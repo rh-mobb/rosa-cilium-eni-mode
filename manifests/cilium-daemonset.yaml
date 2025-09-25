@@ -1,0 +1,218 @@
+# Cilium DaemonSet for AWS ENI Mode
+# This DaemonSet deploys Cilium CNI with AWS ENI mode for directly routable pods
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cilium
+  namespace: kube-system
+  labels:
+    k8s-app: cilium
+spec:
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  template:
+    metadata:
+      labels:
+        k8s-app: cilium
+    spec:
+      serviceAccountName: cilium
+      containers:
+      - name: cilium-agent
+        image: quay.io/cilium/cilium:v1.14.5
+        imagePullPolicy: IfNotPresent
+        command:
+        - cilium-agent
+        args:
+        - --config-dir=/tmp/cilium/config-map
+        - --enable-ipv6=false
+        - --ipam=eni
+        - --enable-bpf-masquerade=true
+        - --enable-hubble=true
+        - --hubble-listen-address=:4244
+        - --hubble-metrics=prometheus
+        - --enable-network-policy=true
+        - --aws-release-excess-ips=true
+        - --cluster-pool-ipv4-cidr=10.0.100.0/24
+        - --enable-prometheus-metrics=true
+        - --prometheus-serve-addr=:9962
+        env:
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: CILIUM_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: CILIUM_CLUSTERMESH_CONFIG
+          value: /var/lib/cilium/clustermesh/
+        - name: CILIUM_CNI_CHAINING_MODE
+          value: "none"
+        - name: CILIUM_CUSTOM_CNI_CONF
+          value: "false"
+        - name: AWS_REGION
+          value: "us-east-2"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: cilium-aws-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cilium-aws-secret
+              key: AWS_SECRET_ACCESS_KEY
+        volumeMounts:
+        - name: bpf-maps
+          mountPath: /sys/fs/bpf
+          mountPropagation: Bidirectional
+        - name: cilium-cgroup
+          mountPath: /run/cilium/cgroupv2
+          mountPropagation: HostToContainer
+        - name: cilium-run
+          mountPath: /var/run/cilium
+        - name: cilium-config-path
+          mountPath: /tmp/cilium/config-map
+          readOnly: true
+        - name: clustermesh-secrets
+          mountPath: /var/lib/cilium/clustermesh
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 9876
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 15
+          successThreshold: 1
+          failureThreshold: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9876
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_RESOURCE
+            - NET_RAW
+            - IPC_LOCK
+            - SYS_ADMIN
+          privileged: false
+        terminationMessagePolicy: FallbackToLogsOnError
+      initContainers:
+      - name: mount-cgroup
+        image: quay.io/cilium/cilium:v1.14.5
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -ec
+        - |
+          cp /usr/bin/cilium-mount /hostbin/cilium-mount;
+          nsenter --cgroup=/hostproc/1/ns/cgroup --mount=/hostproc/1/ns/mnt "${BIN_PATH}/cilium-mount" $CGROUP_ROOT $CILIUM_CGROUP_ROOT;
+          rm /hostbin/cilium-mount
+        env:
+        - name: CGROUP_ROOT
+          value: /run/cilium/cgroupv2
+        - name: CILIUM_CGROUP_ROOT
+          value: /run/cilium/cgroupv2
+        - name: BIN_PATH
+          value: /hostbin
+        securityContext:
+          capabilities:
+            add:
+            - SYS_ADMIN
+          privileged: false
+        volumeMounts:
+        - name: hostproc
+          mountPath: /hostproc
+        - name: hostbin
+          mountPath: /hostbin
+      - name: clean-cilium-state
+        image: quay.io/cilium/cilium:v1.14.5
+        imagePullPolicy: IfNotPresent
+        command:
+        - /init-container.sh
+        env:
+        - name: CILIUM_ALL_STATE
+          value: "true"
+        - name: CILIUM_BPF_STATE
+          value: "true"
+        - name: CILIUM_CGROUP_STATE
+          value: "true"
+        - name: CILIUM_CNI_STATE
+          value: "true"
+        - name: CILIUM_SOCK_STATE
+          value: "true"
+        - name: CILIUM_VETH_STATE
+          value: "true"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_ADMIN
+            - SYS_RESOURCE
+          privileged: false
+        volumeMounts:
+        - name: bpf-maps
+          mountPath: /sys/fs/bpf
+        - name: cilium-cgroup
+          mountPath: /run/cilium/cgroupv2
+        - name: cilium-run
+          mountPath: /var/run/cilium
+      hostNetwork: true
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 1
+      priorityClassName: system-node-critical
+      tolerations:
+      - operator: Exists
+      volumes:
+      - name: bpf-maps
+        hostPath:
+          path: /sys/fs/bpf
+          type: Directory
+      - name: cilium-cgroup
+        hostPath:
+          path: /run/cilium/cgroupv2
+          type: DirectoryOrCreate
+      - name: cilium-run
+        hostPath:
+          path: /var/run/cilium
+          type: DirectoryOrCreate
+      - name: cilium-config-path
+        configMap:
+          name: cilium-config
+          items:
+          - key: cilium-config
+            path: cilium.yaml
+      - name: clustermesh-secrets
+        projected:
+          sources:
+          - secret:
+              name: cilium-clustermesh
+      - name: hostproc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: hostbin
+        hostPath:
+          path: /bin
+          type: Directory

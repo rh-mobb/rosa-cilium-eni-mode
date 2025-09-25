@@ -1,0 +1,111 @@
+# Cilium RBAC Configuration for AWS ENI Mode
+# This provides the necessary permissions for Cilium to manage AWS ENI interfaces
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cilium
+rules:
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - services
+  - nodes
+  - endpoints
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - nodes/status
+  verbs:
+  - patch
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - cilium.io
+  resources:
+  - "*"
+  verbs:
+  - "*"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cilium
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cilium
+subjects:
+- kind: ServiceAccount
+  name: cilium
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cilium-aws-secret
+  namespace: kube-system
+type: Opaque
+data:
+  # These should be populated with actual AWS credentials
+  # Base64 encoded values
+  AWS_ACCESS_KEY_ID: ""  # Will be populated by deployment script
+  AWS_SECRET_ACCESS_KEY: ""  # Will be populated by deployment script
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cilium-clustermesh
+  namespace: kube-system
+type: Opaque
+data:
+  # Clustermesh secrets (if needed)
+  ca.crt: ""
+  tls.crt: ""
+  tls.key: ""

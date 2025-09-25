@@ -1,0 +1,350 @@
+# ROSA HCP with Cilium CNI - .gitignore
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+.terraformrc
+terraform.rc
+
+# AWS CLI
+.aws/
+
+# Kubernetes/OpenShift
+kubeconfig
+kubeconfig-*
+*.kubeconfig
+oc-config
+oc-config-*
+
+# Helm
+charts/
+Chart.lock
+.helmignore
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+helm-debug.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Test files
+test-*
+*-test
+cilium-test/
+
+# Scripts output
+*.out
+*.err
+
+# Cluster-specific files
+cluster-info.txt
+admin-password.txt
+login-command.txt
+
+# OIDC configs (sensitive)
+oidc-config-*.json
+oidc-provider-*.json
+
+# IAM role outputs
+iam-role-*.json
+trust-policy-*.json
+
+# Temporary values files
+*-values-temp.yaml
+temp-values-*.yaml
+
+# Cilium debug files
+cilium-debug-*
+hubble-debug-*
+
+# Network debug files
+network-debug-*
+cni-debug-*
+
+# Security group outputs
+security-group-*.json
+sg-rules-*.json
+
+# Load balancer outputs
+lb-*.json
+elb-*.json
+
+# Node information
+node-info-*.json
+instance-info-*.json
+
+# Pod information
+pod-info-*.json
+pod-ips-*.txt
+
+# Service information
+service-info-*.json
+endpoint-info-*.json
+
+# Debug outputs
+debug-*.log
+debug-*.txt
+debug-*.json
+
+# Cluster state files
+cluster-state-*.json
+cluster-info-*.json
+
+# Resource dumps
+resources-*.json
+all-resources-*.json
+
+# Test results
+test-results-*.json
+test-output-*.txt
+
+# Performance test results
+perf-test-*.json
+benchmark-*.json
+
+# Monitoring outputs
+metrics-*.json
+logs-*.json
+
+# Backup directories
+backup/
+backups/
+*.backup/
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# Certificate files
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+
+# Secret files
+secrets/
+*.secret
+*-secret.*
+
+# Configuration overrides
+config-override-*.yaml
+values-override-*.yaml
+
+# Local development
+local/
+dev/
+development/
+
+# Production overrides
+prod/
+production/
+production-*.yaml
+
+# Staging overrides
+staging/
+staging-*.yaml
+
+# Environment specific
+env-*/
+environment-*/
+
+# Cluster specific
+cluster-*/
+*-cluster/
+
+# Region specific
+*-us-east-1/
+*-us-east-2/
+*-us-west-1/
+*-us-west-2/
+
+# Account specific
+account-*/
+*-account/
+
+# Project specific
+project-*/
+*-project/
+
+# Workspace files
+workspace-*/
+*-workspace/
+
+# Cache directories
+.cache/
+cache/
+
+# Build artifacts
+build/
+dist/
+target/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+
+# Ruby
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/examples.txt
+/test/tmp/
+/test/version_tmp/
+/tmp/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+.env.test
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+
+# Temporary folders
+tmp/
+temp/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+.history/

@@ -1,0 +1,77 @@
+# ROSA HCP Cluster with Routable Pod CIDR - Project Rules
+
+## Core Principles
+- This project focuses on deploying Red Hat OpenShift Service on AWS (ROSA) Hosted Control Plane (HCP) clusters with routable pod CIDR configurations
+- All implementations should follow Red Hat and AWS best practices for security, scalability, and maintainability
+- Documentation is critical - keep all documentation up to date and comprehensive
+
+## Design Documentation Requirements
+- **ALWAYS consult design.md before making any architectural decisions or significant changes**
+- **ALWAYS ask the user before making any design changes** - no exceptions
+- Keep design.md updated as the project evolves
+- Reference design.md in all major implementation decisions
+- When proposing changes, explain how they align with or modify the current design
+
+## Code Standards
+- Use Infrastructure as Code (IaC) principles with Terraform for AWS resource management
+- Follow GitOps practices for cluster configuration and application deployment
+- Implement proper error handling and logging throughout all components
+- Use semantic versioning for releases and tags
+- Write comprehensive tests for all automation scripts and configurations
+
+## Security Requirements
+- Implement least privilege access principles
+- Use AWS IAM roles and policies appropriately
+- Encrypt all data at rest and in transit
+- Follow Red Hat security guidelines for OpenShift deployments
+- Regularly audit and update security configurations
+
+## Documentation Standards
+- Maintain clear, up-to-date README files
+- Document all configuration options and their implications
+- Include troubleshooting guides for common issues
+- Provide clear examples and use cases
+- Keep architecture diagrams current
+
+## Testing and Validation
+- Test all configurations in non-production environments first
+- Validate cluster functionality after deployment
+- Implement automated testing where possible
+- Document test procedures and expected outcomes
+
+## Collaboration Guidelines
+- Use clear, descriptive commit messages
+- Create pull requests for all changes
+- Request reviews for significant changes
+- Communicate design changes and their rationale clearly
+- Keep stakeholders informed of progress and decisions
+
+## Helm Configuration Validation
+- **ALWAYS check hacking/cilium-values-1.18.2.yaml before using any Helm --set parameters**
+- **ALWAYS verify Helm parameter names against hacking/cilium-schema-1.18.2.json**
+- Never use Helm parameters that don't exist in the official values.yaml
+- When in doubt about a Helm parameter, search the values.yaml file first
+- Document any custom Helm configurations and their purpose
+
+## Cilium Deployment Safety
+- **NEVER run `make deploy-cilium` or `make cilium-deploy` without explicit user permission**
+- **ALWAYS ask the user before deploying or redeploying Cilium**
+- Cilium deployment can affect cluster networking and should be carefully controlled
+- If Cilium configuration changes are needed, propose them and wait for approval before deployment
+
+## Technology Stack
+- Terraform for infrastructure provisioning
+- AWS CLI and SDK for AWS resource management
+- Red Hat OpenShift CLI (oc) for cluster operations
+- Kubernetes manifests and operators for application deployment
+- Git for version control and collaboration
+
+## Project Structure
+- `/terraform/` - Infrastructure as Code definitions
+- `/manifests/` - Kubernetes manifests and configurations
+- `/scripts/` - Automation and utility scripts
+- `/docs/` - Additional documentation and guides
+- `/tests/` - Test configurations and validation scripts
+- `/hacking/` - Reference files for validation (Cilium values.yaml, schema.json)
+
+Remember: When in doubt, consult design.md and ask the user before proceeding with any significant changes.

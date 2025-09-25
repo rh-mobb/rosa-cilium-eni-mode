@@ -1,0 +1,48 @@
+# Cilium CNI Configuration for AWS ENI Mode
+# This configuration enables directly routable pod IPs using AWS ENI interfaces
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cilium-config
+  namespace: kube-system
+data:
+  # Enable AWS ENI mode for directly routable pods
+  ipam: "eni"
+
+  # AWS ENI specific configuration
+  eni-tags: |
+    {
+      "kubernetes.io/cluster/rosa-hcp": "owned"
+    }
+
+  # Enable BPF for better performance
+  enable-bpf-masquerade: "true"
+  enable-ipv6: "false"
+
+  # Enable Hubble for observability
+  enable-hubble: "true"
+  hubble-listen-address: ":4244"
+  hubble-metrics: "prometheus"
+
+  # Network policies
+  enable-network-policy: "true"
+
+  # Service mesh (optional)
+  enable-service-mesh: "false"
+
+  # AWS specific settings
+  aws-release-excess-ips: "true"
+  aws-eni-subnet-ids: ""  # Will be populated by Terraform output
+
+  # Pod CIDR configuration
+  cluster-pool-ipv4-cidr: "10.0.100.0/24"
+
+  # Security settings
+  enable-prometheus-metrics: "true"
+  prometheus-serve-addr: ":9962"
+
+  # Logging
+  log-driver: "syslog"
+  log-opt:
+    syslog-facility: "local0"

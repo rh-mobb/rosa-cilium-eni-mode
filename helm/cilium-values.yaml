@@ -1,0 +1,84 @@
+# Cilium CNI Configuration for ROSA HCP with ENI Mode
+# This configuration provides directly routable pod IPs using AWS ENI
+
+# IPAM Configuration - AWS ENI Mode for directly routable pods
+ipam:
+  mode: eni
+
+# ENI Configuration
+eni:
+  enabled: true
+
+# IPv4/IPv6 Configuration
+ipv4:
+  enabled: true
+ipv6:
+  enabled: false
+
+# Network Configuration
+routingMode: native
+kubeProxyReplacement: true
+
+# CNI Configuration for ROSA Multus Integration
+cni:
+  chainingMode: portmap
+  binPath: /var/lib/cni/bin
+  confPath: /var/run/multus/cni/net.d
+
+# Kubernetes Integration
+k8s:
+  requireIPv4PodCIDR: false  # Disabled for ENI mode
+
+# Performance Optimizations
+endpointRoutes:
+  enabled: true
+bpf:
+  preallocateMaps: true
+identityChangeGracePeriod: 0s
+sessionAffinity: true
+
+# Cluster Configuration
+cluster:
+  name: ""  # Will be set via --set cluster.name
+
+# Port Configuration for ROSA
+tunnelPort: 4789
+clusterHealthPort: 9940
+
+# Hubble Configuration
+hubble:
+  enabled: true
+  tls:
+    enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+
+# AWS Integration
+aws:
+  releaseExcessIPs: true
+
+# Additional Features
+enableRemoteNodeIdentity: true
+policy:
+  enabled: true
+metrics:
+  enabled: true
+
+# Operator Configuration
+operator:
+  enabled: true
+
+# Service Account Configuration for IRSA
+serviceAccounts:
+  cilium:
+    create: true
+    name: cilium
+    annotations:
+      eks.amazonaws.com/role-arn: ""  # Will be set via --set
+  operator:
+    create: true
+    name: cilium-operator
+    annotations:
+      eks.amazonaws.com/role-arn: ""  # Will be set via --set
