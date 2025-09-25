@@ -79,8 +79,10 @@ cilium-test/
 
 # Cluster-specific files
 cluster-info.txt
+cluster-info-*.json
 admin-password.txt
 login-command.txt
+.cluster-info-file
 
 # OIDC configs (sensitive)
 oidc-config-*.json

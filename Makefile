@@ -65,14 +65,24 @@ cluster-logs: ## Show ROSA HCP cluster logs
 		echo "ROSA CLI not installed"; \
 	fi
 
-cluster-delete: ## Delete ROSA HCP cluster
-	@echo "$(RED)Deleting ROSA HCP cluster...$(NC)"
-	@read -p "Are you sure you want to delete cluster '$(CLUSTER_NAME)'? [y/N]: " confirm && [ "$$confirm" = "y" ]
-	@if command -v rosa >/dev/null 2>&1; then \
-		rosa delete cluster --cluster=$(CLUSTER_NAME) --yes; \
-	else \
-		echo "ROSA CLI not installed"; \
-	fi
+cluster-delete: ## Delete ROSA HCP cluster and all associated resources
+	@echo "$(RED)WARNING: This will delete the entire cluster and all associated resources!$(NC)"
+	@echo "$(YELLOW)This action cannot be undone.$(NC)"
+	@echo ""
+	@echo "$(GREEN)Resources that will be deleted:$(NC)"
+	@echo "  - ROSA HCP Cluster"
+	@echo "  - Cilium CNI (if deployed)"
+	@echo "  - Operator Roles"
+	@echo "  - Account Roles"
+	@echo "  - OIDC Configuration"
+	@echo "  - Cilium IAM Role"
+	@echo "  - LoadBalancers"
+	@echo ""
+	@read -p "Are you sure you want to continue? (yes/no): " confirm && [ "$$confirm" = "yes" ] || exit 1
+	@echo ""
+	@echo "$(BLUE)Deleting cluster...$(NC)"
+	chmod +x $(SCRIPTS_DIR)/delete-rosa-cluster.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) PREFIX=$(CLUSTER_NAME) $(SCRIPTS_DIR)/delete-rosa-cluster.sh
 
 ## Network Management (Terraform)
 tf-init: ## Initialize Terraform for network infrastructure
