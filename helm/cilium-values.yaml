@@ -56,8 +56,7 @@ hubble:
     enabled: true
 
 # AWS Integration
-aws:
-  releaseExcessIPs: true
+awsReleaseExcessIPs: true
 
 # Additional Features
 enableRemoteNodeIdentity: true
@@ -69,6 +68,9 @@ metrics:
 # Operator Configuration
 operator:
   enabled: true
+  extraEnv:
+    - name: AWS_REGION
+      value: ""  # Will be set via --set operator.extraEnv[0].value
 
 # Service Account Configuration for IRSA
 serviceAccounts:

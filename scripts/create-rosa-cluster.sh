@@ -13,7 +13,10 @@ AZ_COUNT=3
 MACHINE_TYPE="m5.xlarge"
 REPLICAS=3
 MULTI_AZ=true
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(openssl rand -base64 12)}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-'Passw0rd12345!'}"
+
+# Progress tracking
+PROGRESS_FILE="cluster-creation-progress.json"
 
 # Colors for output
 RED='\033[0;31m'
@@ -37,6 +40,81 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Progress tracking functions
+init_progress() {
+    if [ ! -f "$PROGRESS_FILE" ]; then
+        cat > "$PROGRESS_FILE" << EOF
+{
+  "cluster_name": "$CLUSTER_NAME",
+  "region": "$REGION",
+  "steps": {
+    "prerequisites": false,
+    "network": false,
+    "oidc_config": false,
+    "account_roles": false,
+    "operator_roles": false,
+    "cluster": false
+  },
+  "data": {}
+}
+EOF
+    fi
+}
+
+mark_step_complete() {
+    local step="$1"
+    local data="$2"
+
+    # Update the progress file
+    if [ -n "$data" ]; then
+        jq --arg step "$step" --argjson data "$data" '.steps[$step] = true | .data[$step] = $data' "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
+    else
+        jq --arg step "$step" '.steps[$step] = true' "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
+    fi
+}
+
+is_step_complete() {
+    local step="$1"
+    jq -r --arg step "$step" '.steps[$step]' "$PROGRESS_FILE" 2>/dev/null || echo "false"
+}
+
+get_step_data() {
+    local step="$1"
+    jq -r --arg step "$step" '.data[$step] // empty' "$PROGRESS_FILE" 2>/dev/null
+}
+
+skip_if_complete() {
+    local step="$1"
+    if [ "$(is_step_complete "$step")" = "true" ]; then
+        log_success "Step '$step' already completed, skipping..."
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to show progress status
+show_progress() {
+    if [ -f "$PROGRESS_FILE" ]; then
+        log_info "Current deployment progress:"
+        jq -r '.steps | to_entries[] | "  \(.key): \(if .value then "✅ Completed" else "⏳ Pending" end)"' "$PROGRESS_FILE"
+        echo ""
+        log_info "Progress file: $PROGRESS_FILE"
+    else
+        log_info "No progress file found. Starting fresh deployment."
+    fi
+}
+
+# Function to reset progress
+reset_progress() {
+    if [ -f "$PROGRESS_FILE" ]; then
+        rm -f "$PROGRESS_FILE"
+        log_success "Progress reset. Starting fresh deployment."
+    else
+        log_info "No progress file to reset."
+    fi
 }
 
 # Function to check if command exists
@@ -127,12 +205,13 @@ EOF
 check_existing_cluster() {
     log_info "Checking if cluster '$CLUSTER_NAME' already exists..."
 
-    log_info "Running: rosa describe cluster --cluster=$CLUSTER_NAME"
-    local cluster_info
-    cluster_info=$(rosa describe cluster --cluster="$CLUSTER_NAME" 2>/dev/null)
-    local cluster_exit_code=$?
+    log_info "Running: rosa describe cluster --cluster $CLUSTER_NAME -o json"
+    local cluster_exists
+    # Try to describe the cluster; if it fails, output a marker ('.')
+    cluster_exists=$(rosa describe cluster --cluster "$CLUSTER_NAME" -o json 2>/dev/null || echo '.')
 
-    if [ $cluster_exit_code -eq 0 ]; then
+    # Check if the output is not just the marker
+    if [ "$cluster_exists" != "." ]; then
         log_success "Cluster '$CLUSTER_NAME' already exists!"
         log_info "Skipping creation and displaying cluster information..."
         display_cluster_info
@@ -261,8 +340,8 @@ create_operator_roles() {
     else
         # Create operator roles using the prefix approach (before cluster exists)
         local role_prefix="${CLUSTER_NAME}"
-        log_info "Running: aws sts get-caller-identity --query Account --output text"
-        local installer_role_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/${role_prefix}-HCP-ROSA-Installer-Role"
+        log_info "Using AWS account ID: $aws_account_id"
+        local installer_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Installer-Role"
         log_info "Installer role ARN: $installer_role_arn"
 
         log_info "Running: rosa create operator-roles --mode auto --prefix $role_prefix --oidc-config-id $OIDC_CONFIG_ID --role-arn $installer_role_arn --hosted-cp"
@@ -303,10 +382,11 @@ create_cluster() {
         fi
     fi
 
-    # Get account role ARNs
-    local installer_role_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/${role_prefix}-HCP-ROSA-Installer-Role"
-    local support_role_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/${role_prefix}-HCP-ROSA-Support-Role"
-    local worker_role_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/${role_prefix}-HCP-ROSA-Worker-Role"
+    # Get account role ARNs (calculated from cluster name and AWS account ID)
+    log_info "Using AWS account ID: $aws_account_id"
+    local installer_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Installer-Role"
+    local support_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Support-Role"
+    local worker_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Worker-Role"
 
     # Create the cluster
     log_info "Running: rosa create cluster with admin password"
@@ -326,7 +406,7 @@ create_cluster() {
         --replicas "$REPLICAS" \
         --multi-az \
         --no-cni \
-        --admin-password "$ADMIN_PASSWORD" \
+        --cluster-admin-password "$ADMIN_PASSWORD" \
         --output json > cluster-info.json
 
     log_success "ROSA HCP cluster creation initiated successfully"
@@ -408,12 +488,22 @@ display_cluster_info() {
     echo "Admin Password: $ADMIN_PASSWORD"
     echo ""
 
-    if [ -f "cluster-info.json" ]; then
-        echo "Cluster Console URL: $(jq -r '.console.url' cluster-info.json)"
-        echo "Cluster API URL: $(jq -r '.api.url' cluster-info.json)"
-        echo ""
-        echo "Login Command:"
-        echo "oc login $(jq -r '.api.url' cluster-info.json) -u admin -p $ADMIN_PASSWORD"
+    # Fetch cluster info directly from ROSA CLI
+    cluster_json=$(rosa describe cluster --cluster "$CLUSTER_NAME" -o json 2>/dev/null)
+    if [ -n "$cluster_json" ] && [ "$cluster_json" != "null" ]; then
+        console_url=$(echo "$cluster_json" | jq -r '.console.url // empty')
+        api_url=$(echo "$cluster_json" | jq -r '.api.url // empty')
+        if [ -n "$console_url" ]; then
+            echo "Cluster Console URL: $console_url"
+        fi
+        if [ -n "$api_url" ]; then
+            echo "Cluster API URL: $api_url"
+            echo ""
+            echo "Login Command:"
+            echo "oc login $api_url -u cluster-admin -p $ADMIN_PASSWORD"
+        fi
+    else
+        log_warning "Could not retrieve cluster information from ROSA CLI."
     fi
 }
 
@@ -464,42 +554,130 @@ cleanup_network() {
 cleanup() {
     log_info "Cleaning up temporary files..."
     rm -f network-info.json oidc-config.json account-roles.json operator-roles.json cluster-info.json
+    # Note: Progress file is kept for resuming failed deployments
 }
 
 # Main execution
 main() {
-    # Check for cleanup option
-    if [ "$1" = "--cleanup-network" ]; then
-        cleanup_network
-        exit 0
-    fi
+    # Check for command line options
+    case "$1" in
+        "--cleanup-network")
+            cleanup_network
+            exit 0
+            ;;
+        "--show-progress")
+            show_progress
+            exit 0
+            ;;
+        "--reset-progress")
+            reset_progress
+            exit 0
+            ;;
+        "--help"|"-h")
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --cleanup-network    Clean up network resources"
+            echo "  --show-progress      Show current deployment progress"
+            echo "  --reset-progress     Reset progress and start fresh"
+            echo "  --help, -h           Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0                  # Start/resume cluster deployment"
+            echo "  $0 --show-progress  # Check current progress"
+            echo "  $0 --reset-progress # Start fresh deployment"
+            exit 0
+            ;;
+    esac
 
     log_info "Starting ROSA HCP cluster deployment with no CNI mode"
     log_info "Cluster name: $CLUSTER_NAME"
     log_info "Region: $REGION"
 
+    # Initialize progress tracking
+    init_progress
+
+    # Show current progress
+    show_progress
+
     # Set trap for cleanup
     trap cleanup EXIT
 
-# Execute deployment steps
-check_prerequisites
-check_existing_cluster
-create_network
-check_existing_operator_roles
-create_oidc_config
-create_account_roles
-create_operator_roles
-create_cluster
-display_cluster_info
+    # Execute deployment steps with progress tracking
+    if ! skip_if_complete "prerequisites"; then
+        check_prerequisites
+        mark_step_complete "prerequisites"
+    fi
+
+    check_existing_cluster
+
+    if ! skip_if_complete "network"; then
+        create_network
+        mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+    else
+        # Load network data from progress file
+        VPC_ID=$(get_step_data "network" | jq -r '.vpc_id')
+        SUBNET_IDS=$(get_step_data "network" | jq -r '.subnet_ids')
+        log_info "Using existing network: VPC=$VPC_ID, Subnets=$SUBNET_IDS"
+    fi
+
+    if ! skip_if_complete "oidc_config"; then
+        create_oidc_config
+        mark_step_complete "oidc_config" '{"oidc_config_id": "'"$OIDC_CONFIG_ID"'"}'
+    else
+        # Load OIDC config data from progress file
+        OIDC_CONFIG_ID=$(get_step_data "oidc_config" | jq -r '.oidc_config_id')
+        log_info "Using existing OIDC config: $OIDC_CONFIG_ID"
+    fi
+
+    if ! skip_if_complete "account_roles"; then
+        create_account_roles
+        # Save AWS account ID for future use
+        local aws_account_id=$(aws sts get-caller-identity --query Account --output text)
+        mark_step_complete "account_roles" '{"aws_account_id": "'"$aws_account_id"'"}'
+    else
+        # Load AWS account ID from progress file
+        aws_account_id=$(get_step_data "account_roles" | jq -r '.aws_account_id')
+        log_info "Using existing AWS account ID: $aws_account_id"
+    fi
+
+    if ! skip_if_complete "operator_roles"; then
+        check_existing_operator_roles
+        create_operator_roles
+        mark_step_complete "operator_roles"
+    else
+        log_info "Using existing operator roles for cluster: $CLUSTER_NAME"
+    fi
+
+    if ! skip_if_complete "cluster"; then
+        create_cluster
+        # Save cluster ID if cluster was created
+        if [ -f "cluster-info.json" ]; then
+            local cluster_id=$(jq -r '.id' cluster-info.json)
+            mark_step_complete "cluster" '{"cluster_id": "'"$cluster_id"'"}'
+        else
+            mark_step_complete "cluster"
+        fi
+    else
+        # Load cluster ID from progress file
+        cluster_id=$(get_step_data "cluster" | jq -r '.cluster_id // empty')
+        if [ -n "$cluster_id" ]; then
+            log_info "Using existing cluster ID: $cluster_id"
+        fi
+    fi
+
+    display_cluster_info
 
     log_success "ROSA HCP cluster deployment completed successfully!"
     log_warning "Remember: Nodes will be in 'NotReady' state until you install a CNI plugin"
-    log_info "Next steps:"
-    echo "1. Install your preferred CNI plugin (e.g., Calico, Cilium)"
-    echo "2. Monitor cluster status: rosa describe cluster --cluster $CLUSTER_NAME"
+    echo ""
+    echo "Next steps:"
+    echo "1. Install CNI plugin: ./scripts/deploy-cilium.sh"
+    echo "2. Verify cluster: oc get nodes"
     echo "3. Access cluster console: rosa describe cluster --cluster $CLUSTER_NAME --output json | jq -r '.console.url'"
     echo ""
     log_info "To clean up network resources later, run: $0 --cleanup-network"
+    log_info "Progress saved in: $PROGRESS_FILE"
 }
 
 # Run main function

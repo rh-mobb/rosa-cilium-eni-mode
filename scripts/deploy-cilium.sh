@@ -10,6 +10,7 @@ CLUSTER_NAME="${CLUSTER_NAME:-$(whoami)}"
 CILIUM_VERSION="${CILIUM_VERSION:-1.18.2}"
 CILIUM_NAMESPACE="kube-system"
 CILIUM_OPERATOR_NAMESPACE="kube-system"
+AWS_REGION="${AWS_REGION:-us-east-2}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -374,6 +375,7 @@ deploy_cilium() {
     fi
 
     log_info "Using Cilium values file: $values_file"
+    log_info "Using AWS region: $AWS_REGION"
 
     helm upgrade --install cilium cilium/cilium \
         --version "$CILIUM_VERSION" \
@@ -382,6 +384,7 @@ deploy_cilium() {
         --set cluster.name="$CLUSTER_NAME" \
         --set serviceAccounts.cilium.annotations."eks\.amazonaws\.com/role-arn"="$CILIUM_ROLE_ARN" \
         --set serviceAccounts.operator.annotations."eks\.amazonaws\.com/role-arn"="$CILIUM_ROLE_ARN" \
+        --set operator.extraEnv[0].value="$AWS_REGION" \
         --wait \
         --timeout=10m
 
@@ -528,6 +531,7 @@ show_deployment_summary() {
     echo "=========================="
     echo "Cluster: $CLUSTER_NAME"
     echo "Cilium Version: $CILIUM_VERSION"
+    echo "AWS Region: $AWS_REGION"
     echo "Namespace: $CILIUM_NAMESPACE (all components)"
     echo "IPAM Mode: AWS ENI"
     echo "Authentication: IRSA (IAM Roles for Service Accounts)"
