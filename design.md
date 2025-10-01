@@ -51,8 +51,10 @@ This project implements a Red Hat OpenShift Service on AWS (ROSA) Hosted Control
 - **Multus Integration**: Chaining mode with portmap for ROSA compatibility
 - **ENI IP Assignment**: Pods get IPs directly from AWS ENI interfaces
 - **IRSA Authentication**: IAM Roles for Service Accounts for AWS API access
+- **Security Group Auto-Configuration**: Automatic worker security group configuration for ENI mode
 - **Network policies**: Implemented through Cilium NetworkPolicy
 - **Service mesh integration**: Cilium native service mesh or Istio
+- **Kube-proxy Replacement**: Full kube-proxy replacement with eBPF for high performance
 
 ### Deployment Strategy
 
@@ -71,8 +73,10 @@ This project implements a Red Hat OpenShift Service on AWS (ROSA) Hosted Control
 #### Phase 3: Cilium CNI Deployment
 1. Deploy Cilium using Helm with ENI mode configuration
 2. Configure IRSA for AWS API access
-3. Set up Multus CNI integration
-4. Test pod-to-pod communication with ENI IPs
+3. Auto-configure worker security groups for ENI mode
+4. Set up Multus CNI integration
+5. Test pod-to-pod communication with ENI IPs
+6. Verify DNS resolution and service connectivity
 
 #### Phase 4: Production Readiness
 1. Implement monitoring and logging
@@ -169,6 +173,7 @@ The project uses the following components and approaches:
 - **Values File**: Configuration in `helm/cilium-values.yaml`
 - **IRSA Integration**: IAM roles for Cilium operator and agent
 - **Multus Compatibility**: Chaining mode with portmap for ROSA
+- **Security Group Auto-Config**: Automatic worker security group configuration
 - **Status**: ✅ Successfully deployed and operational
 
 #### Automation Scripts
@@ -199,11 +204,14 @@ The project uses the following components and approaches:
 #### ✅ Verified Functionality
 - **Pod Networking**: Pods receive directly routable ENI IPs
 - **Service Discovery**: Internal service communication working
+- **DNS Resolution**: CoreDNS and service discovery working properly
 - **External Access**: LoadBalancer services accessible externally
 - **Direct Pod Access**: Pods accessible directly via ENI IPs from VPC
+- **Pod-to-Pod Communication**: Direct pod-to-pod connectivity working
 - **CNI Health**: All Cilium components healthy and operational
 - **eBPF Mode**: Kube-proxy replacement active
 - **Hubble**: Network observability enabled
+- **Security Groups**: Auto-configured for ENI mode compatibility
 
 #### ✅ Test Results
 - **Test Pod**: nginx-unprivileged running on ENI IP 10.0.0.70
@@ -214,25 +222,40 @@ The project uses the following components and approaches:
 
 ### Project Structure
 ```
-byo-cni-macvlan/
+byo-cni-cillium-eni/
 ├── .cursorrules                 # Development guidelines and rules
 ├── .gitignore                  # Git ignore patterns for sensitive data
 ├── design.md                   # This design document
 ├── README.md                   # Project overview and quick start
+├── QUICKSTART.md               # Quick start guide
 ├── Makefile                    # Automation targets for common operations
+├── cluster-creation-progress.env # Progress tracking for cluster creation
 ├── helm/
-│   └── cilium-values.yaml      # Cilium Helm chart values
+│   ├── cilium-values.yaml      # Cilium Helm chart values
+│   └── cilium-values.yaml.backup # Backup of previous values
+├── manifests/                  # Kubernetes manifests (legacy)
+│   ├── cilium-configmap.yaml
+│   ├── cilium-daemonset.yaml
+│   └── cilium-rbac.yaml
 ├── scripts/
-│   ├── create-rosa-cluster.sh  # ROSA HCP cluster creation
-│   ├── deploy-cilium.sh        # Cilium CNI deployment
+│   ├── create-rosa-cluster.sh  # ROSA HCP cluster creation with progress tracking
+│   ├── deploy-cilium.sh        # Cilium CNI deployment with security group config
 │   ├── uninstall-cilium.sh     # Cilium CNI cleanup
+│   ├── delete-rosa-cluster.sh  # Cluster deletion script
 │   ├── list-oidc-status.sh     # OIDC configuration management
 │   ├── README-cilium.md        # Cilium deployment documentation
+│   ├── README-delete.md        # Cluster deletion documentation
 │   └── README-uninstall.md     # Uninstall documentation
 ├── terraform-vpc/              # VPC infrastructure (cloned module)
-└── hacking/                    # Reference files for validation
-    ├── cilium-values-1.18.2.yaml
-    └── cilium-schema-1.18.2.json
+│   ├── main.tf                 # VPC and subnet definitions
+│   ├── variables.tf            # Terraform variables
+│   ├── outputs.tf              # Terraform outputs
+│   ├── terraform.tfvars        # Variable values
+│   └── zero-egress/            # Zero-egress VPC variant
+├── hacking/                    # Reference files for validation
+│   ├── cilium-values-1.18.2.yaml # Official Cilium values reference
+│   └── cilium-schema-1.18.2.json # Cilium Helm schema validation
+└── tests/                      # Test configurations and validation scripts
 ```
 
 ## Implementation Notes
@@ -269,6 +292,8 @@ byo-cni-macvlan/
 3. **Multus Integration**: Using `/var/run/multus/cni/net.d` path is critical for ROSA compatibility
 4. **Security Groups**: Direct pod access requires explicit security group rules
 5. **Helm Values**: Centralized values file with `--set` overrides is more maintainable
+6. **Security Group Auto-Config**: Automatic worker security group configuration prevents networking issues
+7. **CDI Component Health**: Restarting CDI components resolves TLS handshake errors
 
 #### Common Issues and Solutions
 - **Pod CIDR Error**: Set `k8s.requireIPv4PodCIDR: false` for ENI mode
@@ -276,6 +301,9 @@ byo-cni-macvlan/
 - **IRSA Authentication**: Ensure trust policy matches service account audience
 - **Image Pull Failures**: Use authenticated registries or public images
 - **External Access**: Configure security groups for LoadBalancer services
+- **DNS Resolution Issues**: Ensure security groups allow pod-to-pod communication
+- **TLS Handshake Errors**: Restart CDI components if networking issues persist
+- **PVC Provisioning Failures**: Check EBS CSI driver and CDI component health
 
 #### Operational Insights
 - **Direct Pod Access**: Pods are accessible directly via ENI IPs from VPC resources

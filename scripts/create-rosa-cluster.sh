@@ -15,9 +15,6 @@ REPLICAS=3
 MULTI_AZ=true
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-'Passw0rd12345!'}"
 
-# Progress tracking
-PROGRESS_FILE="cluster-creation-progress.json"
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,47 +39,125 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Progress tracking with environment variables
+PROGRESS_FILE="cluster-creation-progress.env"
+
+# Load existing progress if available
+if [ -f "$PROGRESS_FILE" ]; then
+    log_info "Loading existing progress from $PROGRESS_FILE"
+    source "$PROGRESS_FILE"
+fi
+
+# Initialize progress variables with defaults
+export PREREQUISITES_COMPLETE="${PREREQUISITES_COMPLETE:-false}"
+export NETWORK_COMPLETE="${NETWORK_COMPLETE:-false}"
+export OIDC_CONFIG_COMPLETE="${OIDC_CONFIG_COMPLETE:-false}"
+export ACCOUNT_ROLES_COMPLETE="${ACCOUNT_ROLES_COMPLETE:-false}"
+export OPERATOR_ROLES_COMPLETE="${OPERATOR_ROLES_COMPLETE:-false}"
+export CLUSTER_COMPLETE="${CLUSTER_COMPLETE:-false}"
+
+# Data storage (still need some data)
+export VPC_ID="${VPC_ID:-}"
+export SUBNET_IDS="${SUBNET_IDS:-}"
+export OIDC_CONFIG_ID="${OIDC_CONFIG_ID:-}"
+export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-}"
+export CLUSTER_ID="${CLUSTER_ID:-}"
+
 # Progress tracking functions
 init_progress() {
-    if [ ! -f "$PROGRESS_FILE" ]; then
-        cat > "$PROGRESS_FILE" << EOF
-{
-  "cluster_name": "$CLUSTER_NAME",
-  "region": "$REGION",
-  "steps": {
-    "prerequisites": false,
-    "network": false,
-    "oidc_config": false,
-    "account_roles": false,
-    "operator_roles": false,
-    "cluster": false
-  },
-  "data": {}
+    log_info "Initializing progress tracking with environment variables..."
+    # Environment variables are already set with defaults above
 }
+
+save_progress() {
+    log_info "Saving progress to $PROGRESS_FILE"
+    cat > "$PROGRESS_FILE" << EOF
+# ROSA Cluster Creation Progress
+# Generated on $(date)
+# Cluster: $CLUSTER_NAME
+# Region: $REGION
+
+# Step completion status
+export PREREQUISITES_COMPLETE="$PREREQUISITES_COMPLETE"
+export NETWORK_COMPLETE="$NETWORK_COMPLETE"
+export OIDC_CONFIG_COMPLETE="$OIDC_CONFIG_COMPLETE"
+export ACCOUNT_ROLES_COMPLETE="$ACCOUNT_ROLES_COMPLETE"
+export OPERATOR_ROLES_COMPLETE="$OPERATOR_ROLES_COMPLETE"
+export CLUSTER_COMPLETE="$CLUSTER_COMPLETE"
+
+# Data storage
+export VPC_ID="$VPC_ID"
+export SUBNET_IDS="$SUBNET_IDS"
+export OIDC_CONFIG_ID="$OIDC_CONFIG_ID"
+export AWS_ACCOUNT_ID="$AWS_ACCOUNT_ID"
+export CLUSTER_ID="$CLUSTER_ID"
 EOF
-    fi
 }
 
 mark_step_complete() {
     local step="$1"
     local data="$2"
 
-    # Update the progress file
-    if [ -n "$data" ]; then
-        jq --arg step "$step" --argjson data "$data" '.steps[$step] = true | .data[$step] = $data' "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
-    else
-        jq --arg step "$step" '.steps[$step] = true' "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
-    fi
+    case "$step" in
+        "prerequisites")
+            export PREREQUISITES_COMPLETE="true"
+            ;;
+        "network")
+            export NETWORK_COMPLETE="true"
+            if [ -n "$data" ]; then
+                export VPC_ID=$(echo "$data" | jq -r '.vpc_id // empty')
+                export SUBNET_IDS=$(echo "$data" | jq -r '.subnet_ids // empty')
+            fi
+            ;;
+        "oidc_config")
+            export OIDC_CONFIG_COMPLETE="true"
+            if [ -n "$data" ]; then
+                export OIDC_CONFIG_ID=$(echo "$data" | jq -r '.oidc_config_id // empty')
+            fi
+            ;;
+        "account_roles")
+            export ACCOUNT_ROLES_COMPLETE="true"
+            if [ -n "$data" ]; then
+                export AWS_ACCOUNT_ID=$(echo "$data" | jq -r '.aws_account_id // empty')
+            fi
+            ;;
+        "operator_roles")
+            export OPERATOR_ROLES_COMPLETE="true"
+            ;;
+        "cluster")
+            export CLUSTER_COMPLETE="true"
+            if [ -n "$data" ]; then
+                export CLUSTER_ID=$(echo "$data" | jq -r '.cluster_id // empty')
+            fi
+            ;;
+    esac
+
+    # Save progress after each step
+    save_progress
 }
 
 is_step_complete() {
     local step="$1"
-    jq -r --arg step "$step" '.steps[$step]' "$PROGRESS_FILE" 2>/dev/null || echo "false"
-}
-
-get_step_data() {
-    local step="$1"
-    jq -r --arg step "$step" '.data[$step] // empty' "$PROGRESS_FILE" 2>/dev/null
+    case "$step" in
+        "prerequisites")
+            echo "$PREREQUISITES_COMPLETE"
+            ;;
+        "network")
+            echo "$NETWORK_COMPLETE"
+            ;;
+        "oidc_config")
+            echo "$OIDC_CONFIG_COMPLETE"
+            ;;
+        "account_roles")
+            echo "$ACCOUNT_ROLES_COMPLETE"
+            ;;
+        "operator_roles")
+            echo "$OPERATOR_ROLES_COMPLETE"
+            ;;
+        "cluster")
+            echo "$CLUSTER_COMPLETE"
+            ;;
+    esac
 }
 
 skip_if_complete() {
@@ -97,24 +172,38 @@ skip_if_complete() {
 
 # Function to show progress status
 show_progress() {
-    if [ -f "$PROGRESS_FILE" ]; then
-        log_info "Current deployment progress:"
-        jq -r '.steps | to_entries[] | "  \(.key): \(if .value then "✅ Completed" else "⏳ Pending" end)"' "$PROGRESS_FILE"
-        echo ""
-        log_info "Progress file: $PROGRESS_FILE"
-    else
-        log_info "No progress file found. Starting fresh deployment."
-    fi
+    log_info "Current deployment progress:"
+    echo "  prerequisites: $(if [ "$PREREQUISITES_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo "  network: $(if [ "$NETWORK_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo "  oidc_config: $(if [ "$OIDC_CONFIG_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo "  account_roles: $(if [ "$ACCOUNT_ROLES_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo "  operator_roles: $(if [ "$OPERATOR_ROLES_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo "  cluster: $(if [ "$CLUSTER_COMPLETE" = "true" ]; then echo "✅ Completed"; else echo "⏳ Pending"; fi)"
+    echo ""
+    log_info "Progress tracked via environment variables"
 }
 
 # Function to reset progress
 reset_progress() {
+    export PREREQUISITES_COMPLETE="false"
+    export NETWORK_COMPLETE="false"
+    export OIDC_CONFIG_COMPLETE="false"
+    export ACCOUNT_ROLES_COMPLETE="false"
+    export OPERATOR_ROLES_COMPLETE="false"
+    export CLUSTER_COMPLETE="false"
+    export VPC_ID=""
+    export SUBNET_IDS=""
+    export OIDC_CONFIG_ID=""
+    export AWS_ACCOUNT_ID=""
+    export CLUSTER_ID=""
+
+    # Remove progress file
     if [ -f "$PROGRESS_FILE" ]; then
         rm -f "$PROGRESS_FILE"
-        log_success "Progress reset. Starting fresh deployment."
-    else
-        log_info "No progress file to reset."
+        log_info "Removed progress file: $PROGRESS_FILE"
     fi
+
+    log_success "Progress reset. Starting fresh deployment."
 }
 
 # Function to check if command exists
@@ -136,6 +225,11 @@ check_prerequisites() {
         exit 1
     fi
 
+    if ! command_exists oc; then
+        log_error "OpenShift CLI (oc) is not installed. Please install it first."
+        exit 1
+    fi
+
     # Check if logged into ROSA
     if ! rosa whoami >/dev/null 2>&1; then
         log_error "Not logged into ROSA CLI. Please run 'rosa login' first."
@@ -149,6 +243,36 @@ check_prerequisites() {
     fi
 
     log_success "Prerequisites check passed"
+}
+
+# Function to check if VPC already exists
+check_vpc_exists() {
+    log_info "Checking if VPC already exists for cluster '$CLUSTER_NAME'..."
+
+    # Check if VPC exists by name
+    local vpc_id=$(aws ec2 describe-vpcs \
+        --filters "Name=tag:Name,Values=${CLUSTER_NAME}-vpc" \
+        --query 'Vpcs[0].VpcId' \
+        --output text 2>/dev/null || echo "None")
+
+    if [ "$vpc_id" != "None" ] && [ "$vpc_id" != "null" ] && [ -n "$vpc_id" ]; then
+        log_success "VPC already exists: $vpc_id"
+
+        # Get subnet IDs for this VPC
+        SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --query 'Subnets[].SubnetId' \
+            --output text | tr '\t' ',')
+
+        VPC_ID="$vpc_id"
+
+        log_info "Using existing VPC: $VPC_ID"
+        log_info "Using existing subnets: $SUBNET_IDS"
+        return 0
+    else
+        log_info "VPC does not exist, will create new VPC"
+        return 1
+    fi
 }
 
 # Function to create network using Terraform
@@ -213,11 +337,11 @@ check_existing_cluster() {
     # Check if the output is not just the marker
     if [ "$cluster_exists" != "." ]; then
         log_success "Cluster '$CLUSTER_NAME' already exists!"
-        log_info "Skipping creation and displaying cluster information..."
-        display_cluster_info
-        exit 0
+        log_info "Cluster is ready, will attempt login..."
+        return 0
     else
         log_info "Cluster '$CLUSTER_NAME' does not exist, proceeding with creation..."
+        return 1
     fi
 }
 
@@ -340,8 +464,8 @@ create_operator_roles() {
     else
         # Create operator roles using the prefix approach (before cluster exists)
         local role_prefix="${CLUSTER_NAME}"
-        log_info "Using AWS account ID: $aws_account_id"
-        local installer_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Installer-Role"
+        log_info "Using AWS account ID: $AWS_ACCOUNT_ID"
+        local installer_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${role_prefix}-HCP-ROSA-Installer-Role"
         log_info "Installer role ARN: $installer_role_arn"
 
         log_info "Running: rosa create operator-roles --mode auto --prefix $role_prefix --oidc-config-id $OIDC_CONFIG_ID --role-arn $installer_role_arn --hosted-cp"
@@ -383,10 +507,10 @@ create_cluster() {
     fi
 
     # Get account role ARNs (calculated from cluster name and AWS account ID)
-    log_info "Using AWS account ID: $aws_account_id"
-    local installer_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Installer-Role"
-    local support_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Support-Role"
-    local worker_role_arn="arn:aws:iam::${aws_account_id}:role/${role_prefix}-HCP-ROSA-Worker-Role"
+    log_info "Using AWS account ID: $AWS_ACCOUNT_ID"
+    local installer_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${role_prefix}-HCP-ROSA-Installer-Role"
+    local support_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${role_prefix}-HCP-ROSA-Support-Role"
+    local worker_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${role_prefix}-HCP-ROSA-Worker-Role"
 
     # Create the cluster
     log_info "Running: rosa create cluster with admin password"
@@ -473,6 +597,57 @@ monitor_cluster_creation() {
     fi
 }
 
+# Function to login to the cluster with retry logic
+login_to_cluster() {
+    log_info "Attempting to login to the cluster..."
+
+    # Get cluster API URL
+    local cluster_json=$(rosa describe cluster --cluster "$CLUSTER_NAME" -o json 2>/dev/null)
+    if [ -z "$cluster_json" ] || [ "$cluster_json" = "null" ]; then
+        log_error "Could not retrieve cluster information for login"
+        return 1
+    fi
+
+    local api_url=$(echo "$cluster_json" | jq -r '.api.url // empty')
+    if [ -z "$api_url" ]; then
+        log_error "Could not retrieve cluster API URL"
+        return 1
+    fi
+
+    log_info "Cluster API URL: $api_url"
+    log_info "Attempting login with retry logic (every 10 seconds)..."
+
+    local max_attempts=30  # 5 minutes total
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        log_info "Login attempt $attempt/$max_attempts..."
+
+        # Attempt to login
+        if oc login "$api_url" -u cluster-admin -p "$ADMIN_PASSWORD" --insecure-skip-tls-verify >/dev/null 2>&1; then
+            log_success "Successfully logged into cluster!"
+
+            # Verify login by checking cluster info
+            if oc cluster-info >/dev/null 2>&1; then
+                log_success "Cluster connection verified"
+                log_info "Current context: $(oc config current-context 2>/dev/null || echo 'unknown')"
+                return 0
+            else
+                log_warning "Login succeeded but cluster connection verification failed"
+            fi
+        else
+            log_info "Login attempt $attempt failed, retrying in 10 seconds..."
+        fi
+
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Failed to login to cluster after $max_attempts attempts"
+    log_info "You can try manually: oc login $api_url -u cluster-admin -p $ADMIN_PASSWORD --insecure-skip-tls-verify"
+    return 1
+}
+
 # Function to display cluster information
 display_cluster_info() {
     log_info "Cluster Information:"
@@ -500,7 +675,7 @@ display_cluster_info() {
             echo "Cluster API URL: $api_url"
             echo ""
             echo "Login Command:"
-            echo "oc login $api_url -u cluster-admin -p $ADMIN_PASSWORD"
+            echo "oc login $api_url -u cluster-admin -p $ADMIN_PASSWORD --insecure-skip-tls-verify"
         fi
     else
         log_warning "Could not retrieve cluster information from ROSA CLI."
@@ -573,6 +748,24 @@ main() {
             reset_progress
             exit 0
             ;;
+        "--network-only")
+            log_info "Running network creation only..."
+            if ! skip_if_complete "network"; then
+                # Check if VPC already exists before running Terraform
+                if check_vpc_exists; then
+                    log_success "Using existing VPC infrastructure, skipping Terraform"
+                    mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+                else
+                    create_network
+                    mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+                fi
+            else
+                # Load network data from environment variables
+                log_info "Using existing network: VPC=$VPC_ID, Subnets=$SUBNET_IDS"
+            fi
+            log_success "Network creation completed!"
+            exit 0
+            ;;
         "--help"|"-h")
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -580,12 +773,14 @@ main() {
             echo "  --cleanup-network    Clean up network resources"
             echo "  --show-progress      Show current deployment progress"
             echo "  --reset-progress     Reset progress and start fresh"
+            echo "  --network-only       Create network infrastructure only"
             echo "  --help, -h           Show this help message"
             echo ""
             echo "Examples:"
             echo "  $0                  # Start/resume cluster deployment"
             echo "  $0 --show-progress  # Check current progress"
             echo "  $0 --reset-progress # Start fresh deployment"
+            echo "  $0 --network-only   # Create network only"
             exit 0
             ;;
     esac
@@ -609,15 +804,31 @@ main() {
         mark_step_complete "prerequisites"
     fi
 
-    check_existing_cluster
+    # Check if cluster already exists
+    if check_existing_cluster; then
+        log_info "Cluster already exists, using progress file to determine what steps to skip..."
 
+        # Get network info for existing cluster (no creation, just discovery)
+        log_info "Getting network information for existing cluster..."
+        if check_vpc_exists; then
+            log_success "Found existing VPC infrastructure"
+        else
+            log_warning "Could not find VPC for existing cluster, but continuing with login attempt"
+        fi
+    fi
+
+    # Execute deployment steps with progress tracking (works for both new and existing clusters)
     if ! skip_if_complete "network"; then
-        create_network
-        mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+        # Check if VPC already exists before running Terraform
+        if check_vpc_exists; then
+            log_success "Using existing VPC infrastructure, skipping Terraform"
+            mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+        else
+            create_network
+            mark_step_complete "network" '{"vpc_id": "'"$VPC_ID"'", "subnet_ids": "'"$SUBNET_IDS"'"}'
+        fi
     else
-        # Load network data from progress file
-        VPC_ID=$(get_step_data "network" | jq -r '.vpc_id')
-        SUBNET_IDS=$(get_step_data "network" | jq -r '.subnet_ids')
+        # Load network data from environment variables
         log_info "Using existing network: VPC=$VPC_ID, Subnets=$SUBNET_IDS"
     fi
 
@@ -625,8 +836,7 @@ main() {
         create_oidc_config
         mark_step_complete "oidc_config" '{"oidc_config_id": "'"$OIDC_CONFIG_ID"'"}'
     else
-        # Load OIDC config data from progress file
-        OIDC_CONFIG_ID=$(get_step_data "oidc_config" | jq -r '.oidc_config_id')
+        # Load OIDC config data from environment variables
         log_info "Using existing OIDC config: $OIDC_CONFIG_ID"
     fi
 
@@ -636,9 +846,8 @@ main() {
         local aws_account_id=$(aws sts get-caller-identity --query Account --output text)
         mark_step_complete "account_roles" '{"aws_account_id": "'"$aws_account_id"'"}'
     else
-        # Load AWS account ID from progress file
-        aws_account_id=$(get_step_data "account_roles" | jq -r '.aws_account_id')
-        log_info "Using existing AWS account ID: $aws_account_id"
+        # Load AWS account ID from environment variables
+        log_info "Using existing AWS account ID: $AWS_ACCOUNT_ID"
     fi
 
     if ! skip_if_complete "operator_roles"; then
@@ -659,11 +868,17 @@ main() {
             mark_step_complete "cluster"
         fi
     else
-        # Load cluster ID from progress file
-        cluster_id=$(get_step_data "cluster" | jq -r '.cluster_id // empty')
-        if [ -n "$cluster_id" ]; then
-            log_info "Using existing cluster ID: $cluster_id"
+        # Load cluster ID from environment variables
+        if [ -n "$CLUSTER_ID" ]; then
+            log_info "Using existing cluster ID: $CLUSTER_ID"
         fi
+    fi
+
+    # Attempt to login to the cluster
+    if login_to_cluster; then
+        log_success "Cluster login completed successfully!"
+    else
+        log_warning "Cluster login failed, but cluster is ready for manual login"
     fi
 
     display_cluster_info

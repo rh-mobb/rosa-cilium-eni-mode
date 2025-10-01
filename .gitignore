@@ -352,3 +352,6 @@ temp/
 .history/
 
 cluster-creation-progress.json
+
+
+cluster-creation-progress.env

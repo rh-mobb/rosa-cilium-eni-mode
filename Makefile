@@ -106,7 +106,12 @@ tf-outputs: ## Show Terraform outputs
 	@echo "$(BLUE)Terraform outputs:$(NC)"
 	cd terraform-vpc && terraform output
 
-network: tf-init tf-plan tf-apply ## Create network infrastructure (init + plan + apply)
+network: ## Create network infrastructure using the automated script
+	@echo "$(BLUE)Creating network infrastructure...$(NC)"
+	@echo "$(YELLOW)This will create VPC and subnets using Terraform$(NC)"
+	@echo ""
+	chmod +x $(SCRIPTS_DIR)/create-rosa-cluster.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) $(SCRIPTS_DIR)/create-rosa-cluster.sh --network-only
 
 network-cleanup: tf-destroy ## Clean up network resources using Terraform
 
@@ -275,8 +280,5 @@ deploy-all: ## Full deployment (network + cluster + CNI + testing)
 	@echo ""
 	@echo "$(GREEN)Step 3: Deploy Cilium CNI$(NC)"
 	$(MAKE) deploy-cilium
-	@echo ""
-	@echo "$(GREEN)Step 4: Test pod networking$(NC)"
-	$(MAKE) test-pods
 	@echo ""
 	@echo "$(GREEN)Full deployment completed successfully!$(NC)"

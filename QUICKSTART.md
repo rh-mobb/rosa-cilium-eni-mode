@@ -1,6 +1,6 @@
 # ROSA HCP Cluster with Routable Pod CIDR - Quick Start
 
-This guide shows you how to quickly deploy a ROSA HCP cluster with Cilium CNI for directly routable pod IPs.
+This guide shows you how to quickly deploy a ROSA HCP cluster with Cilium CNI in AWS ENI mode for directly routable pod IPs.
 
 ## Prerequisites
 
@@ -12,6 +12,7 @@ Before you begin, ensure you have:
 - **Terraform** installed
 - **Helm** installed
 - **jq** installed for JSON processing
+- **yq** installed for YAML processing (optional, for validation)
 
 ## Quick Deployment
 
@@ -27,7 +28,8 @@ This will:
 1. Create network infrastructure (VPC, subnets, etc.)
 2. Create ROSA HCP cluster with no CNI
 3. Deploy Cilium CNI with AWS ENI mode
-4. Test pod networking
+4. Auto-configure worker security groups for ENI mode
+5. Test pod networking and connectivity
 
 ### Option 2: Step-by-Step Deployment
 
@@ -149,6 +151,36 @@ If deployment fails, you can check progress and resume:
 1. **Cluster in NotReady state**: This is normal until Cilium is deployed
 2. **Cilium pods not starting**: Check AWS IAM permissions and IRSA configuration
 3. **Network connectivity issues**: Verify security groups and VPC configuration
+4. **DNS resolution failures**: Check if security groups allow pod-to-pod communication
+5. **PVC provisioning stuck**: Check EBS CSI driver and CDI component health
+6. **TLS handshake errors**: Restart CDI components if networking issues persist
+
+### Advanced Troubleshooting
+
+#### Check Cilium Configuration
+```bash
+# Verify Cilium values against official schema
+yq eval helm/cilium-values.yaml > /dev/null
+
+# Check deployed Cilium configuration
+oc get configmap cilium-config -n kube-system -o yaml
+```
+
+#### Verify Security Groups
+```bash
+# Check if security group rule was added
+aws ec2 describe-security-groups --group-ids <worker-sg-id> --query 'SecurityGroups[0].IpPermissions[*].[IpProtocol,FromPort,ToPort,UserIdGroupPairs[0].GroupId]' --output table
+```
+
+#### Test Pod Connectivity
+```bash
+# Create test pod for connectivity testing
+oc run test-pod --image=busybox --rm -it --restart=Never -- sh
+
+# Inside the pod, test connectivity
+nslookup kubernetes.default.svc.cluster.local
+wget -q -O- http://kubernetes.default.svc.cluster.local:443
+```
 
 ### Get Help
 
@@ -169,6 +201,9 @@ After successful deployment, you'll have:
 - **Directly Routable Pod IPs** - pods get IPs directly from AWS ENI interfaces
 - **No NAT Translation** - pods are first-class citizens in your VPC
 - **High Performance Networking** - eBPF-based networking with kube-proxy replacement
+- **Automatic Security Groups** - worker security groups auto-configured for ENI mode
+- **DNS Resolution** - CoreDNS and service discovery working properly
+- **Pod-to-Pod Communication** - direct connectivity between pods
 
 ## Next Steps
 

@@ -180,19 +180,27 @@ delete_cilium_cni() {
         # Run the uninstall script if it exists
         if [[ -f "scripts/uninstall-cilium.sh" ]]; then
             log_info "Running Cilium uninstall script..."
-            bash scripts/uninstall-cilium.sh
+            if bash scripts/uninstall-cilium.sh; then
+                log_success "Cilium uninstall script completed successfully"
+            else
+                log_warning "Cilium uninstall script failed, but continuing with cluster deletion"
+            fi
         else
             log_info "Uninstalling Cilium with Helm..."
-            helm uninstall cilium -n kube-system || log_warning "Failed to uninstall Cilium with Helm"
+            if helm uninstall cilium -n kube-system; then
+                log_success "Cilium Helm uninstall completed successfully"
+            else
+                log_warning "Cilium Helm uninstall failed, but continuing with cluster deletion"
+            fi
         fi
 
-        # Clean up any remaining Cilium resources
+        # Clean up any remaining Cilium resources (non-blocking)
         log_info "Cleaning up remaining Cilium resources..."
-        oc delete pods -n kube-system -l k8s-app=cilium --ignore-not-found=true || true
-        oc delete pods -n kube-system -l name=cilium-operator --ignore-not-found=true || true
-        oc delete serviceaccounts -n kube-system cilium cilium-operator cilium-envoy --ignore-not-found=true || true
+        oc delete pods -n kube-system -l k8s-app=cilium --ignore-not-found=true || log_warning "Failed to delete Cilium pods"
+        oc delete pods -n kube-system -l name=cilium-operator --ignore-not-found=true || log_warning "Failed to delete Cilium operator pods"
+        oc delete serviceaccounts -n kube-system cilium cilium-operator cilium-envoy --ignore-not-found=true || log_warning "Failed to delete Cilium service accounts"
 
-        log_success "Cilium CNI deleted"
+        log_info "Cilium CNI cleanup attempted (cluster deletion will clean up any remaining resources)"
     else
         log_info "Cilium not found, skipping deletion"
     fi

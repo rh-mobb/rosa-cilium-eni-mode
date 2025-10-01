@@ -1,13 +1,18 @@
 # Cilium CNI Configuration for ROSA HCP with ENI Mode
 # This configuration provides directly routable pod IPs using AWS ENI
+# All parameters validated against ./hacking/cilium-values-1.18.2.yaml
 
 # IPAM Configuration - AWS ENI Mode for directly routable pods
 ipam:
-  mode: eni
+  mode: "eni"
+  ciliumNodeUpdateRate: "15s"
 
-# ENI Configuration
+# ENI Configuration - AWS ENI integration
 eni:
   enabled: true
+  awsReleaseExcessIPs: true
+  awsEnablePrefixDelegation: false
+  eniTags: {}
 
 # IPv4/IPv6 Configuration
 ipv4:
@@ -16,26 +21,34 @@ ipv6:
   enabled: false
 
 # Network Configuration
-routingMode: native
-kubeProxyReplacement: true
+routingMode: "native"
+kubeProxyReplacement: "true"
+
+# Kube-proxy replacement configuration for service discovery
+kubeProxyReplacementHealthzBindAddr: "0.0.0.0:10256"
 
 # CNI Configuration for ROSA Multus Integration
 cni:
-  chainingMode: portmap
-  binPath: /var/lib/cni/bin
-  confPath: /var/run/multus/cni/net.d
+  chainingMode: "portmap"
+  binPath: "/var/lib/cni/bin"
+  confPath: "/var/run/multus/cni/net.d"
 
-# Kubernetes Integration
-k8s:
-  requireIPv4PodCIDR: false  # Disabled for ENI mode
+# Enable masquerading for better connectivity
+# This is critical for service connectivity in ENI mode
+enableIPv4Masquerade: true
+enableIPv6Masquerade: false
 
 # Performance Optimizations
 endpointRoutes:
   enabled: true
 bpf:
   preallocateMaps: true
-identityChangeGracePeriod: 0s
-sessionAffinity: true
+  identityChangeGracePeriod: "0s"
+  sessionAffinity: true
+
+# Kubernetes Integration
+k8s:
+  requireIPv4PodCIDR: false  # Disabled for ENI mode
 
 # Cluster Configuration
 cluster:
@@ -55,14 +68,23 @@ hubble:
   ui:
     enabled: true
 
-# AWS Integration
-awsReleaseExcessIPs: true
-
 # Additional Features
 enableRemoteNodeIdentity: true
 policy:
   enabled: true
 metrics:
+  enabled: true
+
+# L7 Proxy disabled to avoid service mesh conflicts with ROSA HCP
+l7Proxy: false
+
+# Disable service mesh features to avoid conflicts with ROSA HCP
+localRedirectPolicy: false
+localRedirectPolicies:
+  enabled: false
+
+# Node configuration
+nodeinit:
   enabled: true
 
 # Operator Configuration

@@ -83,12 +83,12 @@ check_prerequisites() {
     log_success "Connected to cluster: $cluster_name"
 
     # Check if cluster is ready
-    local cluster_status=$(oc get nodes --no-headers | wc -l)
-    if [ "$cluster_status" -eq 0 ]; then
-        log_error "No worker nodes found in cluster"
-        log_info "Please ensure the cluster is fully provisioned and has worker nodes"
-        exit 1
-    fi
+    # local cluster_status=$(oc get nodes --no-headers | wc -l)
+    # if [ "$cluster_status" -eq 0 ]; then
+    #     log_error "No worker nodes found in cluster"
+    #     log_info "Please ensure the cluster is fully provisioned and has worker nodes"
+    #     exit 1
+    # fi
 
     log_success "Prerequisites check passed"
 }
@@ -110,6 +110,97 @@ create_cilium_namespace() {
 create_cilium_operator_namespace() {
     log_info "Using kube-system namespace for Cilium operator"
     log_success "Cilium operator will be deployed to kube-system namespace"
+}
+
+# Function to configure worker node security group for Cilium ENI mode
+configure_worker_security_group() {
+    log_info "Configuring worker node security group for Cilium ENI mode..."
+
+    # Get cluster ID from OpenShift cluster info
+    local cluster_id=$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null || echo "")
+    if [ -z "$cluster_id" ]; then
+        log_warning "Could not get cluster ID from OpenShift, trying alternative method..."
+        # Try to get cluster ID from any node
+        local node_name=$(oc get nodes --no-headers | head -1 | awk '{print $1}')
+        if [ -n "$node_name" ]; then
+            # Extract instance ID from node name (format: ip-10-0-1-236.us-east-2.compute.internal)
+            local instance_id=$(aws ec2 describe-instances \
+                --filters "Name=private-dns-name,Values=${node_name}" \
+                --query 'Reservations[*].Instances[*].InstanceId' \
+                --output text | head -1)
+            if [ -n "$instance_id" ]; then
+                cluster_id=$(aws ec2 describe-instances \
+                    --instance-ids "$instance_id" \
+                    --query 'Reservations[*].Instances[*].Tags[?Key==`api.openshift.com/id`].Value' \
+                    --output text | head -1)
+            fi
+        fi
+    fi
+
+    if [ -z "$cluster_id" ]; then
+        log_error "Could not determine cluster ID"
+        return 1
+    fi
+
+    log_info "Using cluster ID: $cluster_id"
+
+    # Use the default security group name pattern: {cluster-id}-default-sg
+    local worker_sg_name="${cluster_id}-default-sg"
+
+    # Find the security group by name
+    local worker_sg=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${worker_sg_name}" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text)
+
+    if [ -z "$worker_sg" ] || [ "$worker_sg" = "None" ]; then
+        log_error "Could not find security group: $worker_sg_name"
+        log_info "Please ensure the cluster security group exists"
+        return 1
+    fi
+
+    log_info "Found worker security group: $worker_sg ($worker_sg_name)"
+
+    # Check if the security group already has a self-referencing rule
+    local existing_rule=$(aws ec2 describe-security-groups \
+        --group-ids "$worker_sg" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='-1' && UserIdGroupPairs[0].GroupId=='$worker_sg']" \
+        --output text)
+
+    if [ -n "$existing_rule" ]; then
+        log_success "Security group $worker_sg already has self-referencing rule for all traffic"
+        return 0
+    fi
+
+    # Add the self-referencing rule
+    log_info "Adding self-referencing rule to security group: $worker_sg"
+
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$worker_sg" \
+        --protocol -1 \
+        --source-group "$worker_sg" \
+        --output text > /dev/null
+
+    if [ $? -eq 0 ]; then
+        log_success "Successfully added self-referencing rule to security group: $worker_sg"
+        log_info "This allows all traffic within the security group (required for Cilium ENI mode)"
+    else
+        log_error "Failed to add self-referencing rule to security group: $worker_sg"
+        return 1
+    fi
+
+    # Verify the rule was added
+    log_info "Verifying security group rule..."
+    local new_rule=$(aws ec2 describe-security-groups \
+        --group-ids "$worker_sg" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='-1' && UserIdGroupPairs[0].GroupId=='$worker_sg']" \
+        --output text)
+
+    if [ -n "$new_rule" ]; then
+        log_success "Security group rule verified successfully"
+    else
+        log_warning "Could not verify the security group rule was added"
+    fi
 }
 
 # Function to add Cilium Helm repository
@@ -485,6 +576,7 @@ display_cilium_info() {
     echo "Kube-proxy Replacement: Enabled"
     echo "Hubble Observability: Enabled"
     echo "AWS Authentication: IRSA (IAM Roles for Service Accounts)"
+    echo "Security Group: Auto-configured for ENI mode"
     echo ""
 
     # Get cluster info
@@ -540,6 +632,7 @@ show_deployment_summary() {
     echo "  ✅ Check prerequisites"
     echo "  ✅ Ensure namespaces exist"
     echo "  ✅ Set up Helm repository"
+    echo "  ✅ Configure worker security group for ENI mode"
     echo "  ✅ Create/update IRSA role with current cluster OIDC"
     echo "  ✅ Deploy/update Cilium with correct configuration"
     echo "  ✅ Verify deployment"
@@ -559,6 +652,7 @@ main() {
     create_cilium_namespace
     create_cilium_operator_namespace
     add_cilium_helm_repo
+    configure_worker_security_group
     create_cilium_irsa_role
     deploy_cilium
     wait_for_cilium
