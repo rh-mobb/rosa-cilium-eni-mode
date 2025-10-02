@@ -99,7 +99,6 @@ tf-apply: ## Apply Terraform network infrastructure
 
 tf-destroy: ## Destroy Terraform network infrastructure
 	@echo "$(RED)Destroying Terraform infrastructure...$(NC)"
-	@read -p "Are you sure you want to destroy network infrastructure for '$(CLUSTER_NAME)'? [y/N]: " confirm && [ "$$confirm" = "y" ]
 	cd terraform-vpc && terraform destroy -auto-approve
 
 tf-outputs: ## Show Terraform outputs
