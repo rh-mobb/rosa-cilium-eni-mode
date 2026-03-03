@@ -5,11 +5,16 @@
 
 set -eox  # Exit on any error
 
+# Disable AWS CLI pager to prevent interactive prompts in scripts
+export AWS_PAGER=""
+
 # Configuration variables
 CLUSTER_NAME="${CLUSTER_NAME:-$(whoami)}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.18.2}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.19.1}"
 CILIUM_NAMESPACE="kube-system"
 CILIUM_OPERATOR_NAMESPACE="kube-system"
+# Auto-detect region from cluster if not set, fallback to us-east-2
+AWS_REGION="${AWS_REGION:-$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}' 2>/dev/null || true)}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 
 # Colors for output
@@ -114,7 +119,7 @@ create_cilium_operator_namespace() {
 
 # Function to configure worker node security group for Cilium ENI mode
 configure_worker_security_group() {
-    log_info "Configuring worker node security group for Cilium ENI mode..."
+    log_info "Configuring worker node security group for Cilium ENI mode (region: $AWS_REGION)..."
 
     # Get cluster ID from OpenShift cluster info
     local cluster_id=$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null || echo "")
@@ -125,11 +130,13 @@ configure_worker_security_group() {
         if [ -n "$node_name" ]; then
             # Extract instance ID from node name (format: ip-10-0-1-236.us-east-2.compute.internal)
             local instance_id=$(aws ec2 describe-instances \
+                --region "$AWS_REGION" \
                 --filters "Name=private-dns-name,Values=${node_name}" \
                 --query 'Reservations[*].Instances[*].InstanceId' \
                 --output text | head -1)
             if [ -n "$instance_id" ]; then
                 cluster_id=$(aws ec2 describe-instances \
+                    --region "$AWS_REGION" \
                     --instance-ids "$instance_id" \
                     --query 'Reservations[*].Instances[*].Tags[?Key==`api.openshift.com/id`].Value' \
                     --output text | head -1)
@@ -149,6 +156,7 @@ configure_worker_security_group() {
 
     # Find the security group by name
     local worker_sg=$(aws ec2 describe-security-groups \
+        --region "$AWS_REGION" \
         --filters "Name=group-name,Values=${worker_sg_name}" \
         --query 'SecurityGroups[0].GroupId' \
         --output text)
@@ -163,6 +171,7 @@ configure_worker_security_group() {
 
     # Check if the security group already has a self-referencing rule
     local existing_rule=$(aws ec2 describe-security-groups \
+        --region "$AWS_REGION" \
         --group-ids "$worker_sg" \
         --query "SecurityGroups[0].IpPermissions[?IpProtocol=='-1' && UserIdGroupPairs[0].GroupId=='$worker_sg']" \
         --output text)
@@ -176,6 +185,7 @@ configure_worker_security_group() {
     log_info "Adding self-referencing rule to security group: $worker_sg"
 
     aws ec2 authorize-security-group-ingress \
+        --region "$AWS_REGION" \
         --group-id "$worker_sg" \
         --protocol -1 \
         --source-group "$worker_sg" \
@@ -192,6 +202,7 @@ configure_worker_security_group() {
     # Verify the rule was added
     log_info "Verifying security group rule..."
     local new_rule=$(aws ec2 describe-security-groups \
+        --region "$AWS_REGION" \
         --group-ids "$worker_sg" \
         --query "SecurityGroups[0].IpPermissions[?IpProtocol=='-1' && UserIdGroupPairs[0].GroupId=='$worker_sg']" \
         --output text)
@@ -448,6 +459,45 @@ EOF
 
 # Function to check if Cilium is already deployed
 
+# Function to disable kube-proxy (required for Cilium kube-proxy replacement)
+# Patches Network.operator.openshift.io to set deployKubeProxy: false.
+# This is the official OpenShift API - CNO will not deploy kube-proxy.
+disable_kube_proxy() {
+    log_info "Disabling kube-proxy via Network operator (deployKubeProxy: false)..."
+
+    local current=$(oc get network.operator.openshift.io cluster -o jsonpath='{.spec.deployKubeProxy}' 2>/dev/null || echo "")
+    if [ "$current" = "false" ]; then
+        log_success "kube-proxy already disabled (deployKubeProxy: false)"
+        return 0
+    fi
+
+    log_info "Patching network.operator.openshift.io cluster..."
+    oc patch network.operator.openshift.io cluster --type='merge' -p '{"spec":{"deployKubeProxy":false}}'
+
+    if [ $? -ne 0 ]; then
+        log_error "Failed to patch Network operator"
+        return 1
+    fi
+
+    log_success "kube-proxy disabled - CNO will not deploy kube-proxy"
+    log_info "Waiting for kube-proxy pods to terminate (releases port 31415)..."
+    local max_wait=60
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        local kube_proxy_pods=$(oc get pods -n openshift-kube-proxy --no-headers 2>/dev/null | wc -l)
+        if [ "$kube_proxy_pods" -eq 0 ]; then
+            log_success "All kube-proxy pods have terminated"
+            break
+        fi
+        log_info "  Waiting for $kube_proxy_pods kube-proxy pod(s) to terminate... (${waited}s)"
+        sleep 5
+        waited=$((waited + 5))
+    done
+    if [ $waited -ge $max_wait ]; then
+        log_warning "kube-proxy pods may still be terminating - Cilium deploy will proceed"
+    fi
+}
+
 # Function to deploy Cilium using Helm
 deploy_cilium() {
     log_info "Deploying Cilium CNI using Helm with IRSA..."
@@ -468,16 +518,27 @@ deploy_cilium() {
     log_info "Using Cilium values file: $values_file"
     log_info "Using AWS region: $AWS_REGION"
 
+    # Build Helm --set args (Hubble optional - disabled by default for initial deploy robustness)
+    local helm_set_args=(
+        --set cluster.name="$CLUSTER_NAME"
+        --set "serviceAccounts.cilium.annotations.eks\.amazonaws\.com/role-arn=$CILIUM_ROLE_ARN"
+        --set "serviceAccounts.operator.annotations.eks\.amazonaws\.com/role-arn=$CILIUM_ROLE_ARN"
+        --set "operator.extraEnv[0].value=$AWS_REGION"
+    )
+    if [[ "${CILIUM_HUBBLE_ENABLED:-false}" == "true" ]]; then
+        log_info "Hubble observability enabled"
+        helm_set_args+=(--set hubble.enabled=true --set hubble.relay.enabled=true --set hubble.ui.enabled=true)
+    else
+        log_info "Hubble disabled for initial deploy (set CILIUM_HUBBLE_ENABLED=true to enable)"
+    fi
+
     helm upgrade --install cilium cilium/cilium \
         --version "$CILIUM_VERSION" \
         --namespace "$CILIUM_NAMESPACE" \
         --values "$values_file" \
-        --set cluster.name="$CLUSTER_NAME" \
-        --set serviceAccounts.cilium.annotations."eks\.amazonaws\.com/role-arn"="$CILIUM_ROLE_ARN" \
-        --set serviceAccounts.operator.annotations."eks\.amazonaws\.com/role-arn"="$CILIUM_ROLE_ARN" \
-        --set operator.extraEnv[0].value="$AWS_REGION" \
+        "${helm_set_args[@]}" \
         --wait \
-        --timeout=10m
+        --timeout=15m
 
     log_success "Cilium installation completed with IRSA"
 }
@@ -541,7 +602,7 @@ verify_cilium() {
 
     # Check if kube-proxy is disabled
     log_info "Checking kube-proxy status..."
-    local kube_proxy_pods=$(oc get pods -n kube-system -l k8s-app=kube-proxy --no-headers | wc -l)
+    local kube_proxy_pods=$(oc get pods -n openshift-kube-proxy --no-headers 2>/dev/null | wc -l)
     if [ "$kube_proxy_pods" -eq 0 ]; then
         log_success "kube-proxy is disabled (expected with Cilium)"
     else
@@ -634,6 +695,7 @@ show_deployment_summary() {
     echo "  ✅ Set up Helm repository"
     echo "  ✅ Configure worker security group for ENI mode"
     echo "  ✅ Create/update IRSA role with current cluster OIDC"
+    echo "  ✅ Disable kube-proxy (Network operator deployKubeProxy: false)"
     echo "  ✅ Deploy/update Cilium with correct configuration"
     echo "  ✅ Verify deployment"
     echo ""
@@ -654,6 +716,7 @@ main() {
     add_cilium_helm_repo
     configure_worker_security_group
     create_cilium_irsa_role
+    disable_kube_proxy
     deploy_cilium
     wait_for_cilium
     verify_cilium

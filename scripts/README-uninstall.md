@@ -27,7 +27,7 @@ make cilium-uninstall
 
 ### Environment Variables
 - `CLUSTER_NAME`: Name of the cluster (default: current user)
-- `CILIUM_VERSION`: Version of Cilium to uninstall (default: 1.15.4)
+- `CILIUM_VERSION`: Version of Cilium to uninstall (default: 1.19.1)
 
 ## What Gets Removed
 

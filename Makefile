@@ -1,7 +1,7 @@
 # ROSA HCP Cluster with Routable Pod CIDR - Makefile
 # This Makefile provides targets for each major deployment step
 
-.PHONY: help clean setup-cluster deploy-cilium test-pods test-pods-cleanup status logs cluster-status cluster-logs cluster-delete network-cleanup tf-init tf-plan tf-apply tf-destroy tf-outputs cilium-deploy cilium-status cilium-logs cilium-test cilium-uninstall
+.PHONY: help clean clean-all cleanup-orphaned-roles setup-cluster deploy-cilium test-pods test-pods-cleanup test-network test-network-delete-vm test-network-cleanup status logs cluster-status cluster-logs cluster-delete network-cleanup tf-init tf-plan tf-apply tf-destroy tf-outputs cilium-deploy cilium-disable-kube-proxy cilium-status cilium-logs cilium-test cilium-uninstall
 
 # Default target
 .DEFAULT_GOAL := help
@@ -48,6 +48,7 @@ setup-cluster: ## Setup ROSA HCP cluster using the automated script
 	@echo "$(GREEN)Next steps:$(NC)"
 	@echo "  1. Deploy Cilium CNI: make deploy-cilium"
 	@echo "  2. Test pod networking: make test-pods"
+	@echo "  3. Test full connectivity: make test-network"
 
 cluster-status: ## Check ROSA HCP cluster status
 	@echo "$(BLUE)Checking cluster status...$(NC)"
@@ -78,7 +79,9 @@ cluster-delete: ## Delete ROSA HCP cluster and all associated resources
 	@echo "  - Cilium IAM Role"
 	@echo "  - LoadBalancers"
 	@echo ""
-	@read -p "Are you sure you want to continue? (yes/no): " confirm && [ "$$confirm" = "yes" ] || exit 1
+	@if [ -z "$${SKIP_CONFIRM}" ]; then \
+		read -p "Are you sure you want to continue? [y/N]: " confirm && [ "$$confirm" = "y" ] || exit 1; \
+	fi
 	@echo ""
 	@echo "$(BLUE)Deleting cluster...$(NC)"
 	chmod +x $(SCRIPTS_DIR)/delete-rosa-cluster.sh
@@ -119,11 +122,16 @@ deploy-cilium: ## Deploy Cilium CNI with AWS ENI mode using Helm
 	@echo "$(BLUE)Deploying Cilium CNI using Helm...$(NC)"
 	@echo "$(YELLOW)Make sure your cluster is ready and you're connected to it$(NC)"
 	@echo ""
-	$(SCRIPTS_DIR)/deploy-cilium.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) AWS_REGION=$(AWS_REGION) $(SCRIPTS_DIR)/deploy-cilium.sh
 	@echo ""
 	@echo "$(GREEN)Cilium CNI deployment completed!$(NC)"
 
 cilium-deploy: deploy-cilium ## Alias for deploy-cilium
+
+cilium-disable-kube-proxy: ## Disable OpenShift kube-proxy via Network operator (deployKubeProxy: false)
+	@echo "$(YELLOW)Patching Network operator to disable kube-proxy...$(NC)"
+	oc patch network.operator.openshift.io cluster --type='merge' -p '{"spec":{"deployKubeProxy":false}}' || true
+	@echo "$(GREEN)Done. CNO will not deploy kube-proxy.$(NC)"
 
 cilium-status: ## Check Cilium CNI status
 	@echo "$(BLUE)Checking Cilium CNI status...$(NC)"
@@ -213,6 +221,19 @@ test-pods-cleanup: ## Clean up test pods and resources
 	kubectl delete namespace test-pods --ignore-not-found=true
 	@echo "$(GREEN)Test resources cleaned up$(NC)"
 
+test-network: ## Test pod network connectivity (Pod-to-VM + VM-to-pod; SKIP_VM=1 to omit)
+	@echo "$(BLUE)Testing pod network connectivity...$(NC)"
+	chmod +x $(SCRIPTS_DIR)/test-network-connectivity.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) $(SCRIPTS_DIR)/test-network-connectivity.sh $(if $(SKIP_VM),--skip-vm,) $(if $(LEAVE_VM),--leave-vm,)
+
+test-network-delete-vm: ## Terminate test VM(s) left running by --leave-vm or on failure
+	$(SCRIPTS_DIR)/test-network-connectivity.sh --delete-vm
+
+test-network-cleanup: ## Clean up network connectivity test resources
+	@echo "$(BLUE)Cleaning up network connectivity test resources...$(NC)"
+	$(SCRIPTS_DIR)/test-network-connectivity.sh --cleanup
+	@echo "$(GREEN)Network test resources cleaned up$(NC)"
+
 ## Monitoring and Status
 status: ## Show cluster and CNI status
 	@echo "$(BLUE)Cluster Status$(NC)"
@@ -235,16 +256,31 @@ logs: ## Show logs from Cilium pods
 	kubectl logs -n kube-system -l k8s-app=cilium --tail=50
 
 ## Cleanup
-clean: ## Clean up temporary files
+cleanup-orphaned-roles: ## Remove orphaned operator/account roles (run when create fails with "existing operator roles")
+	@echo "$(YELLOW)Removing orphaned ROSA operator and account roles for prefix $(CLUSTER_NAME)...$(NC)"
+	@rosa delete operator-roles --prefix $(CLUSTER_NAME) --yes --mode auto || echo "No operator roles or delete failed"
+	@rosa delete account-roles --prefix $(CLUSTER_NAME) --yes --mode auto || echo "No account roles or delete failed"
+	@echo "$(GREEN)Orphaned roles cleanup attempted$(NC)"
+
+clean: ## Clean up temporary files and progress state
 	@echo "$(BLUE)Cleaning up temporary files...$(NC)"
 	rm -f *.json
 	rm -f *.log
+	rm -f .env
+	rm -f cluster-creation-progress.env
+	@if [ -f .cluster-info-file ]; then \
+		rm -f "$$(cat .cluster-info-file)" 2>/dev/null || true; \
+		rm -f .cluster-info-file; \
+	fi
 	@echo "$(GREEN)Cleanup completed$(NC)"
 
 clean-all: ## Clean up everything (cluster + network + files)
 	@echo "$(RED)This will delete the cluster, network, and clean up files$(NC)"
-	@read -p "Are you sure? [y/N]: " confirm && [ "$$confirm" = "y" ]
-	$(MAKE) cluster-delete
+	@echo "$(YELLOW)This action cannot be undone.$(NC)"
+	@echo ""
+	@read -p "Are you sure? [y/N]: " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo ""
+	SKIP_CONFIRM=1 $(MAKE) cluster-delete
 	$(MAKE) network-cleanup
 	$(MAKE) clean
 	@echo "$(GREEN)Complete cleanup finished$(NC)"

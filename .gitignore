@@ -1,5 +1,7 @@
 # ROSA HCP with Cilium CNI - .gitignore
 
+reference/
+
 # Terraform
 *.tfstate
 *.tfstate.*

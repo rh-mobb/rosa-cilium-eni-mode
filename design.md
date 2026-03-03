@@ -194,7 +194,7 @@ The project uses the following components and approaches:
 
 #### ✅ Successfully Deployed Components
 1. **ROSA HCP Cluster**: 3 worker nodes, all Ready status
-2. **Cilium CNI**: Version 1.18.2 with ENI mode
+2. **Cilium CNI**: Version 1.19.1 with ENI mode
 3. **IRSA Authentication**: Cilium operator has AWS API access
 4. **Multus Integration**: CNI chaining with portmap working
 5. **Direct Pod Access**: Pods get ENI IPs (e.g., 10.0.0.70)
@@ -253,8 +253,8 @@ byo-cni-cillium-eni/
 │   ├── terraform.tfvars        # Variable values
 │   └── zero-egress/            # Zero-egress VPC variant
 ├── hacking/                    # Reference files for validation
-│   ├── cilium-values-1.18.2.yaml # Official Cilium values reference
-│   └── cilium-schema-1.18.2.json # Cilium Helm schema validation
+│   ├── cilium-values-1.19.1.yaml # Official Cilium values reference
+│   └── cilium-schema-1.19.1.json # Cilium Helm schema validation
 └── tests/                      # Test configurations and validation scripts
 ```
 

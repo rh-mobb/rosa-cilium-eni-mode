@@ -64,10 +64,10 @@ make cilium-test
 
 The script uses the following default configuration:
 
-- **Cilium Version**: 1.15.4
+- **Cilium Version**: 1.19.1
 - **IPAM Mode**: AWS ENI
 - **kube-proxy Replacement**: Enabled
-- **Hubble Observability**: Enabled
+- **Hubble Observability**: Disabled by default (set `CILIUM_HUBBLE_ENABLED=true` to enable)
 - **Namespace**: kube-system
 
 ### Customizing Configuration
@@ -75,8 +75,9 @@ The script uses the following default configuration:
 You can customize the deployment by setting environment variables:
 
 ```bash
-export CILIUM_VERSION="1.15.5"
+export CILIUM_VERSION="1.19.2"
 export CLUSTER_NAME="my-cluster"
+export CILIUM_HUBBLE_ENABLED="true"  # Enable Hubble UI/relay (disabled by default for initial deploy)
 ./scripts/deploy-cilium.sh
 ```
 
@@ -122,13 +123,25 @@ export CLUSTER_NAME="my-cluster"
    oc login <cluster-api-url> -u admin -p <password>
    ```
 
-3. **Cilium pods not starting**
+3. **Cilium pods not starting (DaemonSet 0/N)**
    ```bash
-   # Check pod logs
+   # Check Cilium agent logs
    oc logs -n kube-system -l k8s-app=cilium
 
+   # Check operator logs (ENI allocation, IRSA)
+   oc logs -n kube-system -l name=cilium-operator
+
    # Check events
-   oc get events -n kube-system
+   oc get events -n kube-system --sort-by='.lastTimestamp'
+
+   # Verify security group has self-referencing rule (required for ENI mode)
+   # Verify IRSA role has correct OIDC trust policy
+   ```
+
+4. **Helm timeout (Hubble relay/ui)**
+   Hubble is disabled by default for initial deploy. If you need it:
+   ```bash
+   CILIUM_HUBBLE_ENABLED=true make deploy-cilium
    ```
 
 ### Useful Commands

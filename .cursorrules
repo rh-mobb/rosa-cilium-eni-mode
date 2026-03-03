@@ -47,8 +47,8 @@
 - Keep stakeholders informed of progress and decisions
 
 ## Helm Configuration Validation
-- **ALWAYS check hacking/cilium-values-1.18.2.yaml before using any Helm --set parameters**
-- **ALWAYS verify Helm parameter names against hacking/cilium-schema-1.18.2.json**
+- **ALWAYS check hacking/cilium-values-1.19.1.yaml before using any Helm --set parameters**
+- **ALWAYS verify Helm parameter names against hacking/cilium-schema-1.19.1.json**
 - Never use Helm parameters that don't exist in the official values.yaml
 - When in doubt about a Helm parameter, search the values.yaml file first
 - Document any custom Helm configurations and their purpose

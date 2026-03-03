@@ -1,6 +1,6 @@
 # Cilium CNI Configuration for ROSA HCP with ENI Mode
 # This configuration provides directly routable pod IPs using AWS ENI
-# All parameters validated against ./hacking/cilium-values-1.18.2.yaml
+# All parameters validated against ./hacking/cilium-values-1.19.1.yaml
 
 # IPAM Configuration - AWS ENI Mode for directly routable pods
 ipam:
@@ -33,9 +33,8 @@ cni:
   binPath: "/var/lib/cni/bin"
   confPath: "/var/run/multus/cni/net.d"
 
-# Enable masquerading for better connectivity
-# This is critical for service connectivity in ENI mode
-enableIPv4Masquerade: true
+# Disable masquerading - pods get real/routable ENI IPs, no NAT needed per design
+enableIPv4Masquerade: false
 enableIPv6Masquerade: false
 
 # Performance Optimizations
@@ -59,14 +58,16 @@ tunnelPort: 4789
 clusterHealthPort: 9940
 
 # Hubble Configuration
+# Disabled by default for initial deploy - Hubble agent + TLS can cause cilium-agent
+# init failure (CrashLoopBackOff) when certs aren't ready. Enable via CILIUM_HUBBLE_ENABLED=true.
 hubble:
-  enabled: true
+  enabled: false
   tls:
     enabled: true
   relay:
-    enabled: true
+    enabled: false
   ui:
-    enabled: true
+    enabled: false
 
 # Additional Features
 enableRemoteNodeIdentity: true

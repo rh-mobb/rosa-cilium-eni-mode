@@ -65,6 +65,22 @@ make test-pods
 
 This creates a test pod and verifies that networking is working correctly.
 
+#### 5. Test Full Network Connectivity (Optional)
+
+```bash
+make test-network
+```
+
+This runs a comprehensive connectivity test from inside a pod:
+- **Internal Kubernetes API** - `kubernetes.default.svc.cluster.local`
+- **External Kubernetes API** - Public API endpoint
+- **OpenShift Console** - Web console URL
+- **Internet** - google.com (validates egress)
+- **Service discovery** - Curl second pod via Service DNS, ping pod IP directly
+- **Pod-to-VM** - Pod curls VM httpd + **VM-to-pod** - VM pings pod (via SSM)
+
+Useful after Cilium deployment to verify both in-cluster and external networking.
+
 ## Verification
 
 ### Check Cluster Status

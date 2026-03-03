@@ -5,9 +5,12 @@
 
 set -eox  # Exit on any error
 
+# Disable AWS CLI pager to prevent interactive prompts in scripts
+export AWS_PAGER=""
+
 # Configuration variables
 CLUSTER_NAME="${CLUSTER_NAME:-$(whoami)}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.15.4}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.19.1}"
 CILIUM_NAMESPACE="kube-system"
 CILIUM_OPERATOR_NAMESPACE="kube-system"
 

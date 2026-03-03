@@ -5,6 +5,9 @@
 
 set -eox #ox  # Exit on any error
 
+# Disable AWS CLI pager to prevent interactive prompts in scripts
+export AWS_PAGER=""
+
 # Configuration variables
 CLUSTER_NAME="${CLUSTER_NAME:-pczarkow}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
@@ -268,14 +271,37 @@ wait_for_cluster_deletion() {
 
 # Function to delete operator roles
 delete_operator_roles() {
+    local cluster_id=""
+
+    # Get cluster ID from saved cluster info (preferred - cluster-specific roles)
+    if [[ -f ".cluster-info-file" ]]; then
+        local cluster_info_file
+        cluster_info_file=$(cat ".cluster-info-file" 2>/dev/null)
+        if [[ -f "$cluster_info_file" ]]; then
+            cluster_id=$(jq -r '.id' "$cluster_info_file" 2>/dev/null | grep -v "^null$" || echo "")
+        fi
+    fi
+
+    # Try cluster-specific deletion first (requires cluster ID - works even after cluster is deleted)
+    if [[ -n "$cluster_id" && "$cluster_id" != "null" ]]; then
+        log_info "Deleting operator roles for cluster ID '$cluster_id'..."
+        if rosa delete operator-roles --cluster "$cluster_id" --yes --mode auto; then
+            log_success "Operator roles deleted"
+            return 0
+        else
+            log_warning "Cluster-based operator role deletion failed, trying prefix fallback..."
+        fi
+    fi
+
+    # Fallback: delete by prefix (for reusable OIDC or when cluster info unavailable)
     log_info "Deleting operator roles for prefix '$PREFIX'..."
 
-    # List operator roles
-    local operator_roles_json=$(rosa list operator-roles --prefix "$PREFIX" -o json 2>/dev/null || echo "[]")
+    local operator_roles_json
+    operator_roles_json=$(rosa list operator-roles --prefix "$PREFIX" -o json 2>/dev/null || echo "[]")
 
-    # Check if we got valid JSON and extract role names
     if echo "$operator_roles_json" | jq -e '. | length > 0' >/dev/null 2>&1; then
-        local operator_roles=$(echo "$operator_roles_json" | jq -r '.[].role_name' 2>/dev/null | grep -v "^null$" | grep -v "^$" || echo "")
+        local operator_roles
+        operator_roles=$(echo "$operator_roles_json" | jq -r '.[].role_name' 2>/dev/null | grep -v "^null$" | grep -v "^$" || echo "")
 
         if [[ -n "$operator_roles" ]]; then
             log_info "Found operator roles:"
@@ -285,7 +311,6 @@ delete_operator_roles() {
                 fi
             done
 
-            # Delete operator roles by prefix
             log_info "Deleting operator roles for prefix '$PREFIX'..."
             if rosa delete operator-roles --prefix "$PREFIX" --yes --mode auto; then
                 log_success "Operator roles deleted"
@@ -402,10 +427,10 @@ cleanup_aws_resources() {
 
     # Clean up any LoadBalancers created by the cluster
     log_info "Cleaning up LoadBalancers..."
-    aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerName, `'"$CLUSTER_NAME"'`)].LoadBalancerArn' --output text | while read -r lb_arn; do
+    aws elbv2 describe-load-balancers --region "$AWS_REGION" --query 'LoadBalancers[?contains(LoadBalancerName, `'"$CLUSTER_NAME"'`)].LoadBalancerArn' --output text | while read -r lb_arn; do
         if [[ -n "$lb_arn" ]]; then
             log_info "Deleting LoadBalancer: $lb_arn"
-            aws elbv2 delete-load-balancer --load-balancer-arn "$lb_arn" || log_warning "Failed to delete LoadBalancer: $lb_arn"
+            aws elbv2 delete-load-balancer --region "$AWS_REGION" --load-balancer-arn "$lb_arn" || log_warning "Failed to delete LoadBalancer: $lb_arn"
         fi
     done
 
@@ -470,8 +495,8 @@ main() {
         has_cluster_info=true
         log_info "Cluster not found but cluster info file exists - proceeding with cleanup"
     else
-        log_warning "Cluster '$CLUSTER_NAME' not found and no cluster info file. Nothing to delete."
-        exit 0
+        log_warning "Cluster '$CLUSTER_NAME' not found and no cluster info file."
+        log_info "Proceeding with prefix-based cleanup (operator roles, account roles, Cilium IAM)..."
     fi
 
     if [[ "$cluster_exists" == "true" ]]; then

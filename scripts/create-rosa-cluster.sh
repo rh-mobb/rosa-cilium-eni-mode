@@ -5,6 +5,9 @@
 
 set -eox  # Exit on any error
 
+# Disable AWS CLI pager to prevent interactive prompts in scripts
+export AWS_PAGER=""
+
 # Configuration variables
 REGION="us-east-2"
 CLUSTER_NAME="${CLUSTER_NAME:-$(whoami)}"
@@ -251,6 +254,7 @@ check_vpc_exists() {
 
     # Check if VPC exists by name
     local vpc_id=$(aws ec2 describe-vpcs \
+        --region "$REGION" \
         --filters "Name=tag:Name,Values=${CLUSTER_NAME}-vpc" \
         --query 'Vpcs[0].VpcId' \
         --output text 2>/dev/null || echo "None")
@@ -260,6 +264,7 @@ check_vpc_exists() {
 
         # Get subnet IDs for this VPC
         SUBNET_IDS=$(aws ec2 describe-subnets \
+            --region "$REGION" \
             --filters "Name=vpc-id,Values=$vpc_id" \
             --query 'Subnets[].SubnetId' \
             --output text | tr '\t' ',')
@@ -358,7 +363,8 @@ check_existing_operator_roles() {
         log_error "Operator roles are tied to a specific OIDC configuration."
         log_error "You must delete the existing operator roles before creating a new OIDC config."
         log_info "To delete existing operator roles, run:"
-        log_info "  rosa delete operator-roles --prefix $CLUSTER_NAME --yes"
+        log_info "  make cleanup-orphaned-roles"
+        log_info "  # or: rosa delete operator-roles --prefix $CLUSTER_NAME --yes --mode auto"
         log_info "Then run this script again."
         exit 1
     else
