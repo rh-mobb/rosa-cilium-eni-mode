@@ -57,6 +57,9 @@ make deploy-cilium
 
 This deploys Cilium with AWS ENI mode, enabling directly routable pod IPs.
 
+> [!Note]
+> On ROSA HCP clusters created with `--no-cni`, Cilium bootstrap may need an explicit kubeconfig-based bootstrap path to reach and trust the Kubernetes API during early startup. This deployment creates a `cilium-kubeconfig` secret in `kube-system` and mounts it at `/var/lib/cilium/bootstrap`, with Cilium using `/var/lib/cilium/bootstrap/kubeconfig` during bootstrap.
+
 #### 4. Test Pod Networking
 
 ```bash
@@ -170,6 +173,9 @@ If deployment fails, you can check progress and resume:
 4. **DNS resolution failures**: Check if security groups allow pod-to-pod communication
 5. **PVC provisioning stuck**: Check EBS CSI driver and CDI component health
 6. **TLS handshake errors**: Restart CDI components if networking issues persist
+7. **Cilium init stuck / bootstrap failing**: Verify the `cilium-kubeconfig` secret exists in `kube-system` and is mounted at `/var/lib/cilium/bootstrap`
+8. **External API TLS trust errors**: If logs show `x509: certificate signed by unknown authority`, verify Cilium is using the bootstrap kubeconfig path rather than relying on the default in-cluster API path
+9. **Conflicting kubeconfig mounts**: Ensure there is no stale `kube-config` hostPath mount at `/var/lib/cilium/bootstrap/kubeconfig`
 
 ### Advanced Troubleshooting
 
