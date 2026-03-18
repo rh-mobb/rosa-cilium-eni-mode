@@ -498,6 +498,24 @@ disable_kube_proxy() {
     fi
 }
 
+create_cilium_kubeconfig_secret() {
+    log_info "Creating/updating Cilium bootstrap kubeconfig secret..."
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local kubeconfig_file="${tmp_dir}/kubeconfig"
+
+    oc config view --raw --minify > "${kubeconfig_file}"
+
+    kubectl -n "${CILIUM_NAMESPACE}" create secret generic cilium-kubeconfig \
+      --from-file=kubeconfig="${kubeconfig_file}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    rm -rf "${tmp_dir}"
+
+    log_success "Cilium bootstrap kubeconfig secret is ready"
+}
+
 # Function to deploy Cilium using Helm
 deploy_cilium() {
     log_info "Deploying Cilium CNI using Helm with IRSA..."
@@ -538,7 +556,8 @@ deploy_cilium() {
         --values "$values_file" \
         "${helm_set_args[@]}" \
         --wait \
-        --timeout=15m
+        --timeout=30m
+
 
     log_success "Cilium installation completed with IRSA"
 }
@@ -716,6 +735,7 @@ main() {
     add_cilium_helm_repo
     configure_worker_security_group
     create_cilium_irsa_role
+    create_cilium_kubeconfig_secret
     disable_kube_proxy
     deploy_cilium
     wait_for_cilium

@@ -107,3 +107,37 @@ serviceAccounts:
     name: cilium-operator
     annotations:
       eks.amazonaws.com/role-arn: ""  # Will be set via --set
+
+
+# ROSA HCP no-CNI bootstrap
+# allow Cilium agent/operator to use an explicit kubeconfig during early bootstrap
+# when in-cluster service IP access or API cert trust is not yet available.
+kubeConfigPath: "/var/lib/cilium/bootstrap/kubeconfig"
+
+# mount a kubeconfig secret for agent pods
+extraVolumes:
+  - name: cilium-kubeconfig
+    secret:
+      secretName: cilium-kubeconfig
+
+extraVolumeMounts:
+  - name: cilium-kubeconfig
+    mountPath: /var/lib/cilium/bootstrap
+    readOnly: true
+
+operator:
+  enabled: true
+  extraEnv:
+    - name: AWS_REGION
+      value: "" # will be set via --set operator.extraEnv[0].value
+
+  # mount same kubeconfig secret for operator pods
+  extraVolumes:
+    - name: cilium-kubeconfig
+      secret:
+        secretName: cilium-kubeconfig
+
+  extraVolumeMounts:
+    - name: cilium-kubeconfig
+      mountPath: /var/lib/cilium/bootstrap
+      readOnly: true
